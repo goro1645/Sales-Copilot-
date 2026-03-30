@@ -31,6 +31,7 @@ This is easier to reason about as a graph than as one large prompt or a single s
 - `agent/storage.py`: SQLite persistence
 - `scripts/openai_api_utils.py`: OpenAI-style tool-calling helpers
 - `scripts/job_agent_demo.py`: CLI demo
+- `scripts/job_agent_web_demo.py`: Streamlit dashboard
 
 ## Local verification
 
@@ -61,6 +62,12 @@ python D:\minimind\.worktrees\minimind-job-agent\scripts\job_agent_demo.py `
   --use-api-generation `
   --api-base-url "http://127.0.0.1:8998/v1" `
   --api-model "minimind"
+```
+
+Run the Streamlit dashboard:
+
+```powershell
+streamlit run D:\minimind\.worktrees\minimind-job-agent\scripts\job_agent_web_demo.py
 ```
 
 ## Resume framing

@@ -2001,6 +2001,12 @@ python scripts/job_agent_demo.py `
   --api-model "minimind"
 ```
 
+You can also open the Streamlit dashboard:
+
+```powershell
+streamlit run scripts/job_agent_web_demo.py
+```
+
 More implementation notes are in [`docs/job-agent-project-notes.md`](./docs/job-agent-project-notes.md).
 
 

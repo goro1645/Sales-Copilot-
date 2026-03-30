@@ -3,6 +3,57 @@ import re
 from agent.schemas import ApplicationRecord
 
 
+JOB_POSTING_STOPWORDS = {
+    "a",
+    "ability",
+    "an",
+    "and",
+    "around",
+    "backend",
+    "build",
+    "building",
+    "company",
+    "data",
+    "demos",
+    "designing",
+    "engineer",
+    "engineering",
+    "experience",
+    "familiarity",
+    "for",
+    "frameworks",
+    "in",
+    "integrating",
+    "is",
+    "labs",
+    "language",
+    "lightweight",
+    "looking",
+    "models",
+    "need",
+    "needs",
+    "of",
+    "or",
+    "other",
+    "preferred",
+    "practical",
+    "products",
+    "quality",
+    "reliability",
+    "required",
+    "requirements",
+    "role",
+    "similar",
+    "skills",
+    "stores",
+    "strong",
+    "the",
+    "to",
+    "with",
+    "workflows",
+}
+
+
 def extract_keywords(text: str) -> list[str]:
     """Return lowercase keywords in first-seen order.
 
@@ -50,32 +101,51 @@ def score_resume_fit(
 
 
 def parse_job_description(job_posting: str) -> dict:
-    """Extract a lightweight summary and a deterministic skill list from a JD."""
+    """Extract a lightweight summary and skill lists from a JD.
 
-    stopwords = {
-        "a",
-        "an",
-        "and",
-        "experience",
-        "for",
-        "in",
-        "need",
-        "needs",
-        "of",
-        "or",
-        "preferred",
-        "required",
-        "role",
-        "the",
-        "with",
-    }
-    # We keep the rule-based parser tiny, but filtering JD boilerplate words prevents
-    # obviously wrong scores and makes the demo output easier to trust.
-    keywords = [keyword for keyword in extract_keywords(job_posting) if keyword not in stopwords]
+    Strategy:
+    1. If the JD contains explicit `Requirements` / `Preferred` sections, trust those first.
+    2. Otherwise fall back to a filtered full-text keyword scan.
+    """
+
+    def filtered_keywords(text: str) -> list[str]:
+        return [keyword for keyword in extract_keywords(text) if keyword not in JOB_POSTING_STOPWORDS]
+
+    current_section = None
+    required_skills: list[str] = []
+    preferred_skills: list[str] = []
+
+    for raw_line in job_posting.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        lowered = line.lower().lstrip("#").strip()
+        if "requirement" in lowered or lowered == "required":
+            current_section = "required"
+            continue
+        if "preferred" in lowered or "nice to have" in lowered:
+            current_section = "preferred"
+            continue
+        if line.startswith("#"):
+            current_section = None
+            continue
+        if not line.startswith(("-", "*")) or current_section is None:
+            continue
+
+        keywords = filtered_keywords(line[1:].strip())
+        target = required_skills if current_section == "required" else preferred_skills
+        for keyword in keywords:
+            if keyword not in target:
+                target.append(keyword)
+
+    if not required_skills and not preferred_skills:
+        required_skills = filtered_keywords(job_posting)
+
     return {
         "job_summary": job_posting.strip(),
-        "required_skills": keywords,
-        "preferred_skills": [],
+        "required_skills": required_skills,
+        "preferred_skills": preferred_skills,
     }
 
 

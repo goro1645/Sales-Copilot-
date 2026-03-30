@@ -1966,4 +1966,41 @@ If you find MiniMind helpful in your research or work, please cite:
 
 This repository is licensed under the [Apache-2.0 License](LICENSE).
 
+## MiniMind Job Agent
+
+This worktree also contains a `MiniMind + LangGraph` job-application copilot prototype.
+
+Key capabilities:
+
+- Parse a job description and extract skill requirements
+- Score resume-job fit with deterministic rules
+- Rewrite resume content for medium and high match jobs
+- Generate a cover letter through either deterministic fallback logic or the local MiniMind OpenAI-style API
+- Persist application records in SQLite
+
+Quickstart:
+
+```powershell
+python scripts/job_agent_demo.py `
+  --company "MiniMind Labs" `
+  --role "LLM Application Engineer" `
+  --job-posting "data/job_agent/sample_jd.md" `
+  --resume-text "data/job_agent/sample_resume.md"
+```
+
+If you have the local MiniMind API running, you can enable generation mode:
+
+```powershell
+python scripts/job_agent_demo.py `
+  --company "MiniMind Labs" `
+  --role "LLM Application Engineer" `
+  --job-posting "data/job_agent/sample_jd.md" `
+  --resume-text "data/job_agent/sample_resume.md" `
+  --use-api-generation `
+  --api-base-url "http://127.0.0.1:8998/v1" `
+  --api-model "minimind"
+```
+
+More implementation notes are in [`docs/job-agent-project-notes.md`](./docs/job-agent-project-notes.md).
+
 

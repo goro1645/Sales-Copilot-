@@ -1,4 +1,9 @@
-from agent.tools import build_application_record, extract_keywords, score_resume_fit
+from agent.tools import (
+    build_application_record,
+    extract_keywords,
+    parse_job_description,
+    score_resume_fit,
+)
 
 
 def test_extract_keywords_returns_stable_unique_tokens():
@@ -43,3 +48,21 @@ def test_build_application_record_serializes_expected_fields():
     assert record["resume_version"] == "resume_v2"
     assert record["cover_letter"] == "Cover letter content"
     assert record["created_at"]
+
+
+def test_parse_job_description_prefers_requirement_and_preferred_sections():
+    job_posting = """
+## Requirements
+- Python
+- FastAPI
+- LangGraph
+- SQLite
+
+## Preferred
+- Streamlit
+"""
+
+    parsed = parse_job_description(job_posting)
+
+    assert parsed["required_skills"] == ["python", "fastapi", "langgraph", "sqlite"]
+    assert parsed["preferred_skills"] == ["streamlit"]

@@ -9,6 +9,51 @@ from agent.tools import (
 )
 
 
+def _generate_rewritten_resume(state: JobAgentState, content_generator=None) -> str:
+    fallback = rewrite_resume_for_job(
+        resume_text=state["resume_text"],
+        role=state["role"],
+        required_skills=state.get("required_skills", []),
+        matched_skills=state.get("matched_skills", []),
+    )
+    if content_generator is None:
+        return fallback
+
+    try:
+        generated = content_generator.rewrite_resume(
+            role=state["role"],
+            resume_text=state["resume_text"],
+            required_skills=state.get("required_skills", []),
+            matched_skills=state.get("matched_skills", []),
+            missing_skills=state.get("missing_skills", []),
+        )
+        return generated.strip() or fallback
+    except Exception:
+        # The graph should still complete even if the LLM service is temporarily unavailable.
+        return fallback
+
+
+def _generate_cover_letter(state: JobAgentState, content_generator=None) -> str:
+    fallback = generate_cover_letter(
+        company=state["company"],
+        role=state["role"],
+        matched_skills=state.get("matched_skills", []),
+    )
+    if content_generator is None:
+        return fallback
+
+    try:
+        generated = content_generator.generate_cover_letter(
+            company=state["company"],
+            role=state["role"],
+            matched_skills=state.get("matched_skills", []),
+            resume_text=state["resume_text"],
+        )
+        return generated.strip() or fallback
+    except Exception:
+        return fallback
+
+
 def prepare_job_node(state: JobAgentState) -> dict:
     """Populate JD-derived fields only when the caller did not provide them already."""
 
@@ -51,38 +96,23 @@ def reject_node(state: JobAgentState) -> dict:
     }
 
 
-def rewrite_resume_node(state: JobAgentState) -> dict:
+def rewrite_resume_node(state: JobAgentState, content_generator=None) -> dict:
     return {
         "apply_decision": "rewrite_resume",
-        "rewritten_resume": rewrite_resume_for_job(
-            resume_text=state["resume_text"],
-            role=state["role"],
-            required_skills=state.get("required_skills", []),
-            matched_skills=state.get("matched_skills", []),
-        ),
+        "rewritten_resume": _generate_rewritten_resume(state, content_generator),
         "cover_letter": "",
     }
 
 
-def ready_to_apply_node(state: JobAgentState) -> dict:
-    matched_skills = state.get("matched_skills", [])
+def ready_to_apply_node(state: JobAgentState, content_generator=None) -> dict:
     return {
         "apply_decision": "ready_to_apply",
-        "rewritten_resume": rewrite_resume_for_job(
-            resume_text=state["resume_text"],
-            role=state["role"],
-            required_skills=state.get("required_skills", []),
-            matched_skills=matched_skills,
-        ),
-        "cover_letter": generate_cover_letter(
-            company=state["company"],
-            role=state["role"],
-            matched_skills=matched_skills,
-        ),
+        "rewritten_resume": _generate_rewritten_resume(state, content_generator),
+        "cover_letter": _generate_cover_letter(state, content_generator),
     }
 
 
-def build_job_agent_graph():
+def build_job_agent_graph(content_generator=None):
     """Compile the first job-agent graph.
 
     The graph intentionally stays small:
@@ -95,8 +125,8 @@ def build_job_agent_graph():
     builder.add_node("prepare_job", prepare_job_node)
     builder.add_node("score_fit", score_fit_node)
     builder.add_node("reject", reject_node)
-    builder.add_node("rewrite_resume", rewrite_resume_node)
-    builder.add_node("ready_to_apply", ready_to_apply_node)
+    builder.add_node("rewrite_resume", lambda state: rewrite_resume_node(state, content_generator))
+    builder.add_node("ready_to_apply", lambda state: ready_to_apply_node(state, content_generator))
 
     builder.set_entry_point("prepare_job")
     builder.add_edge("prepare_job", "score_fit")

@@ -1,0 +1,1 @@
+"""MiniMind job agent package."""

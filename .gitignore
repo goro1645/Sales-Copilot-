@@ -1,4 +1,5 @@
 __pycache__/
+data/job_agent/*.db
 model/__pycache__
 out
 website/

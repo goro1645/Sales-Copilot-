@@ -49,6 +49,70 @@ def score_resume_fit(
     }
 
 
+def parse_job_description(job_posting: str) -> dict:
+    """Extract a lightweight summary and a deterministic skill list from a JD."""
+
+    stopwords = {
+        "a",
+        "an",
+        "and",
+        "experience",
+        "for",
+        "in",
+        "need",
+        "needs",
+        "of",
+        "or",
+        "preferred",
+        "required",
+        "role",
+        "the",
+        "with",
+    }
+    # We keep the rule-based parser tiny, but filtering JD boilerplate words prevents
+    # obviously wrong scores and makes the demo output easier to trust.
+    keywords = [keyword for keyword in extract_keywords(job_posting) if keyword not in stopwords]
+    return {
+        "job_summary": job_posting.strip(),
+        "required_skills": keywords,
+        "preferred_skills": [],
+    }
+
+
+def rewrite_resume_for_job(
+    *,
+    resume_text: str,
+    role: str,
+    required_skills: list[str],
+    matched_skills: list[str],
+) -> str:
+    """Produce a readable fallback rewrite before we plug in the MiniMind generator."""
+
+    highlighted = ", ".join(matched_skills or required_skills[:3])
+    return (
+        f"Tailored for {role}\n"
+        f"{resume_text}\n\n"
+        f"Relevant skills to highlight: {highlighted}"
+    )
+
+
+def generate_cover_letter(
+    *,
+    company: str,
+    role: str,
+    matched_skills: list[str],
+) -> str:
+    """Create a deterministic cover letter skeleton for high-match cases."""
+
+    skills_summary = ", ".join(matched_skills) or "relevant LLM application skills"
+    return (
+        f"Dear {company},\n\n"
+        f"I am excited to apply for the {role} role. My background aligns well with "
+        f"the following skills: {skills_summary}.\n\n"
+        "Best regards,"
+    )
+
+
 def build_application_record(
     *,
     company: str,

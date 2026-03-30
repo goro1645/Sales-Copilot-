@@ -6,7 +6,6 @@ import sys
 __package__ = "scripts"
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import time
-import torch
 import warnings
 import uvicorn
 
@@ -14,17 +13,49 @@ from threading import Thread
 from queue import Queue
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer
-from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
-from model.model_lora import apply_lora, load_lora
+from pydantic import BaseModel, Field
+
+from scripts.openai_api_utils import build_chat_prompt, parse_tool_call_response
+
+try:
+    import torch
+    from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer
+    from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
+    from model.model_lora import apply_lora, load_lora
+except ModuleNotFoundError:
+    # We keep the module importable for tests and tooling. The actual runtime check happens
+    # only when a request needs the model stack.
+    torch = None
+    AutoTokenizer = None
+    AutoModelForCausalLM = None
+    TextStreamer = None
+    MiniMindConfig = None
+    MiniMindForCausalLM = None
+    apply_lora = None
+    load_lora = None
 
 warnings.filterwarnings('ignore')
 
 app = FastAPI()
+device = "cpu"
+model = None
+tokenizer = None
+
+
+def ensure_runtime_ready():
+    """Fail with a clear message only when model-serving code is actually used."""
+
+    if torch is None or AutoTokenizer is None or MiniMindForCausalLM is None:
+        raise RuntimeError(
+            "MiniMind service runtime is not ready. Please install torch and model dependencies "
+            "before starting the API server."
+        )
+    if model is None or tokenizer is None:
+        raise RuntimeError("MiniMind model is not initialized. Start the API script from __main__ first.")
 
 
 def init_model(args):
+    ensure_runtime_ready()
     tokenizer = AutoTokenizer.from_pretrained(args.load_from)
     if 'model' in args.load_from:
         moe_suffix = '_moe' if args.use_moe else ''
@@ -53,11 +84,13 @@ class ChatRequest(BaseModel):
     top_p: float = 0.92
     max_tokens: int = 8192
     stream: bool = False
-    tools: list = []
+    tools: list = Field(default_factory=list)
 
 
-class CustomStreamer(TextStreamer):
+class CustomStreamer(TextStreamer if TextStreamer is not None else object):
     def __init__(self, tokenizer, queue):
+        if TextStreamer is None:
+            raise RuntimeError("Transformers runtime is unavailable for streaming generation.")
         super().__init__(tokenizer, skip_prompt=True, skip_special_tokens=True)
         self.queue = queue
         self.tokenizer = tokenizer
@@ -68,9 +101,15 @@ class CustomStreamer(TextStreamer):
             self.queue.put(None)
 
 
-def generate_stream_response(messages, temperature, top_p, max_tokens):
+def generate_stream_response(messages, temperature, top_p, max_tokens, tools=None):
     try:
-        new_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)[-max_tokens:]
+        ensure_runtime_ready()
+        new_prompt = build_chat_prompt(
+            tokenizer=tokenizer,
+            messages=messages,
+            max_tokens=max_tokens,
+            tools=tools,
+        )
         inputs = tokenizer(new_prompt, return_tensors="pt", truncation=True).to(device)
 
         queue = Queue()
@@ -113,22 +152,25 @@ def generate_stream_response(messages, temperature, top_p, max_tokens):
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatRequest):
     try:
+        ensure_runtime_ready()
         if request.stream:
             return StreamingResponse(
                 (f"data: {chunk}\n\n" for chunk in generate_stream_response(
                     messages=request.messages,
                     temperature=request.temperature,
                     top_p=request.top_p,
-                    max_tokens=request.max_tokens
+                    max_tokens=request.max_tokens,
+                    tools=request.tools,
                 )),
                 media_type="text/event-stream"
             )
         else:
-            new_prompt = tokenizer.apply_chat_template(
-                request.messages,
-                tokenize=False,
-                add_generation_prompt=True
-            )[-request.max_tokens:]
+            new_prompt = build_chat_prompt(
+                tokenizer=tokenizer,
+                messages=request.messages,
+                max_tokens=request.max_tokens,
+                tools=request.tools,
+            )
             inputs = tokenizer(new_prompt, return_tensors="pt", truncation=True).to(device)
             with torch.no_grad():
                 generated_ids = model.generate(
@@ -142,6 +184,11 @@ async def chat_completions(request: ChatRequest):
                     temperature=request.temperature
                 )
                 answer = tokenizer.decode(generated_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+            assistant_payload = parse_tool_call_response(answer)
+            finish_reason = "tool_calls" if assistant_payload["tool_calls"] else "stop"
+            message = {"role": "assistant", "content": assistant_payload["content"]}
+            if assistant_payload["tool_calls"]:
+                message["tool_calls"] = assistant_payload["tool_calls"]
             return {
                 "id": f"chatcmpl-{int(time.time())}",
                 "object": "chat.completion",
@@ -150,8 +197,8 @@ async def chat_completions(request: ChatRequest):
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": answer},
-                        "finish_reason": "stop"
+                        "message": message,
+                        "finish_reason": finish_reason
                     }
                 ]
             }

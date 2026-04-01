@@ -1,0 +1,170 @@
+from pathlib import Path
+
+from sales_copilot.storage import (
+    get_account_by_id,
+    get_account_memory,
+    init_storage,
+    list_accounts,
+    list_crm_updates,
+    list_knowledge_chunks,
+    list_meeting_records,
+    list_tasks,
+    save_account,
+    save_crm_update,
+    save_knowledge_chunk,
+    save_meeting_record,
+    save_task_record,
+    update_account_stage_and_status,
+    upsert_account_memory,
+)
+
+
+def test_storage_creates_tables_and_persists_accounts(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+
+    init_storage(db_path)
+    save_account(
+        db_path,
+        {
+            "name": "Acme Robotics",
+            "industry": "Manufacturing",
+            "size_segment": "Mid-Market",
+            "status": "active",
+            "opportunity_stage": "discovery",
+        },
+    )
+
+    rows = list_accounts(db_path)
+
+    assert len(rows) == 1
+    assert rows[0]["name"] == "Acme Robotics"
+    assert rows[0]["opportunity_stage"] == "discovery"
+
+
+def test_storage_can_read_and_update_accounts(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    account_id = save_account(
+        db_path,
+        {
+            "name": "Northwind Traders",
+            "industry": "Retail",
+            "size_segment": "Enterprise",
+            "status": "active",
+            "opportunity_stage": "discovery",
+        },
+    )
+
+    before = get_account_by_id(db_path, account_id)
+    update_account_stage_and_status(
+        db_path,
+        account_id=account_id,
+        status="paused",
+        opportunity_stage="proposal",
+        last_contact_at="2026-04-01",
+    )
+    after = get_account_by_id(db_path, account_id)
+
+    assert before["status"] == "active"
+    assert after["status"] == "paused"
+    assert after["opportunity_stage"] == "proposal"
+    assert after["last_contact_at"] == "2026-04-01"
+
+
+def test_storage_supports_meetings_tasks_memory_and_crm_updates(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    account_id = save_account(
+        db_path,
+        {
+            "name": "Acme Robotics",
+            "industry": "Manufacturing",
+            "size_segment": "Mid-Market",
+            "status": "active",
+            "opportunity_stage": "discovery",
+        },
+    )
+    meeting_id = save_meeting_record(
+        db_path,
+        {
+            "account_id": account_id,
+            "meeting_title": "Discovery Call",
+            "meeting_note_raw": "CTO asked for deployment options.",
+            "meeting_summary_json": '{"confirmed_needs": ["private deployment"]}',
+            "lead_score": 88,
+            "priority": "high",
+        },
+    )
+    save_task_record(
+        db_path,
+        {
+            "account_id": account_id,
+            "meeting_id": meeting_id,
+            "title": "Send proposal",
+            "description": "Send tailored proposal before Friday",
+            "priority": "high",
+            "due_at": "2026-04-03",
+            "status": "open",
+        },
+    )
+    upsert_account_memory(
+        db_path,
+        account_id,
+        {
+            "confirmed_needs_json": '["private deployment"]',
+            "budget_signals_json": '["budget approved"]',
+            "timeline_signals_json": '["this quarter"]',
+            "decision_makers_json": '["CTO"]',
+            "risk_flags_json": '["security_review"]',
+            "recommended_next_step": "Book technical demo",
+        },
+    )
+    save_crm_update(
+        db_path,
+        {
+            "account_id": account_id,
+            "meeting_id": meeting_id,
+            "update_type": "account_stage",
+            "before_json": '{"opportunity_stage": "discovery"}',
+            "after_json": '{"opportunity_stage": "proposal"}',
+        },
+    )
+
+    meeting_rows = list_meeting_records(db_path)
+    task_rows = list_tasks(db_path)
+    memory_row = get_account_memory(db_path, account_id)
+    crm_rows = list_crm_updates(db_path)
+
+    assert meeting_rows[0]["priority"] == "high"
+    assert task_rows[0]["status"] == "open"
+    assert memory_row["recommended_next_step"] == "Book technical demo"
+    assert crm_rows[0]["update_type"] == "account_stage"
+
+
+def test_storage_persists_knowledge_chunks_with_source_filter(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    save_knowledge_chunk(
+        db_path,
+        {
+            "source_type": "product",
+            "source_name": "Deployment Guide",
+            "chunk_text": "Supports private deployment.",
+            "tags_json": '["deployment"]',
+            "retrieval_metadata_json": '{"rank": 1}',
+        },
+    )
+    save_knowledge_chunk(
+        db_path,
+        {
+            "source_type": "playbook",
+            "source_name": "Discovery Playbook",
+            "chunk_text": "Ask about technical requirements.",
+            "tags_json": '["discovery"]',
+            "retrieval_metadata_json": '{"rank": 2}',
+        },
+    )
+
+    all_chunks = list_knowledge_chunks(db_path)
+    product_chunks = list_knowledge_chunks(db_path, source_type="product")
+
+    assert len(all_chunks) == 2
+    assert len(product_chunks) == 1
+    assert product_chunks[0]["source_name"] == "Deployment Guide"

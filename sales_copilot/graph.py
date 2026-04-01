@@ -27,8 +27,8 @@ def route_after_lead_evaluation(state: SalesCopilotState) -> str:
     risk_flags = state.get("risk_flags") or []
     lead_score = int(state.get("lead_score", 0))
 
-    # 只有精确的缺失关键信息标记才进入补充信息分支，避免误伤其他正常场景。
-    if risk_flags == ["missing_required_facts"]:
+    # 空摘要或明确缺失关键信息时，先走补充信息分支，避免过早进入跟进或 CRM 写回。
+    if not meeting_summary or risk_flags == ["missing_required_facts"]:
         return "need_more_info"
     if lead_score < 50:
         return "low_priority_nurture"

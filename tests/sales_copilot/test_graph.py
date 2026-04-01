@@ -21,6 +21,19 @@ def test_route_after_lead_evaluation_returns_need_more_info():
     assert route == "need_more_info"
 
 
+def test_route_after_lead_evaluation_returns_need_more_info_for_empty_summary():
+    state = {
+        "meeting_summary": {},
+        "lead_score": 90,
+        "lead_priority": "high",
+        "risk_flags": ["missing_budget"],
+    }
+
+    route = route_after_lead_evaluation(state)
+
+    assert route == "need_more_info"
+
+
 def test_route_after_lead_evaluation_returns_low_priority_nurture():
     state = {
         "meeting_summary": {"confirmed_needs": ["pricing overview"]},

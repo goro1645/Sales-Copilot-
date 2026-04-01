@@ -1,0 +1,23 @@
+[
+  {
+    "name": "Acme Robotics",
+    "industry": "Manufacturing",
+    "size_segment": "Mid-Market",
+    "status": "active",
+    "opportunity_stage": "discovery"
+  },
+  {
+    "name": "Northwind Traders",
+    "industry": "Retail",
+    "size_segment": "Enterprise",
+    "status": "active",
+    "opportunity_stage": "proposal"
+  },
+  {
+    "name": "BluePeak Health",
+    "industry": "Healthcare",
+    "size_segment": "Enterprise",
+    "status": "active",
+    "opportunity_stage": "qualification"
+  }
+]

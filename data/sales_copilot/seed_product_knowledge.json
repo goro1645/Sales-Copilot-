@@ -1,0 +1,27 @@
+{
+  "source_type": "product",
+  "source_name": "Sales Copilot Product Brief",
+  "chunks": [
+    {
+      "chunk_text": "Sales Copilot helps account teams capture meeting notes, keep account memory fresh, and turn follow-up actions into tracked work.\n\nThe workflow is deterministic and storage-backed, so the same inputs always produce the same outputs.",
+      "tags": ["product", "workflow", "account-memory"],
+      "retrieval_metadata": {
+        "section": "overview"
+      }
+    },
+    {
+      "chunk_text": "Deployment options include private deployment for security-sensitive teams, plus standard shared deployment for lighter use cases.\n\nSecurity teams often ask about SSO, audit logging, and how customer data is isolated.",
+      "tags": ["deployment", "security", "sso", "audit-log"],
+      "retrieval_metadata": {
+        "section": "deployment"
+      }
+    },
+    {
+      "chunk_text": "CRM sync writes account stage changes, meeting summaries, and next-step notes back through the storage layer.\n\nThis keeps the sales record consistent without needing model calls.",
+      "tags": ["crm", "sync", "storage"],
+      "retrieval_metadata": {
+        "section": "crm-sync"
+      }
+    }
+  ]
+}

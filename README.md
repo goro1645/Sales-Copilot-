@@ -2009,4 +2009,35 @@ streamlit run scripts/job_agent_web_demo.py
 
 More implementation notes are in [`docs/job-agent-project-notes.md`](./docs/job-agent-project-notes.md).
 
+## Sales Copilot
+
+`Sales Copilot` is a local enterprise-style sales workbench built on top of MiniMind, LangGraph, deterministic tools, and a DeepSeek-compatible client layer.
+
+Key capabilities:
+
+- Upload or paste customer profile and meeting note content
+- Extract structured meeting facts with JSON-oriented prompts
+- Retrieve product/playbook/account context with deterministic keyword search
+- Reuse account memory and open tasks across repeated runs
+- Simulate CRM updates, follow-up task creation, and dashboard rendering through a LangGraph workflow
+
+Quickstart:
+
+```powershell
+$env:DEEPSEEK_API_KEY="your-key"
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' -m streamlit run scripts/sales_copilot_web_demo.py
+```
+
+Targeted verification:
+
+```powershell
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' -m pytest tests/sales_copilot tests/llm/test_deepseek_client.py tests/scripts/test_sales_copilot_web_utils.py -q
+```
+
+Architecture notes:
+
+- LangGraph orchestrates ingestion, retrieval, memory loading, lead scoring, follow-up planning, CRM simulation, and dashboard rendering.
+- DeepSeek powers structured extraction and reasoning through an OpenAI-style chat completions client.
+- All state-changing actions go through deterministic tools and SQLite persistence so the workflow stays inspectable and testable.
+
 

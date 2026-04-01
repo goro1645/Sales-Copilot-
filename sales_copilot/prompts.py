@@ -1,6 +1,3 @@
-from __future__ import annotations
-
-
 def _build_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": system_prompt},
@@ -8,7 +5,11 @@ def _build_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]
     ]
 
 
-def build_meeting_parse_messages(*, meeting_notes: str) -> list[dict[str, str]]:
+def build_meeting_parse_messages(
+    *,
+    customer_profile_text: str,
+    meeting_note_text: str,
+) -> list[dict[str, str]]:
     system_prompt = (
         "You are a sales copilot. Extract only facts that appear in the notes. "
         "Return valid JSON only. Do not invent missing details."
@@ -16,15 +17,18 @@ def build_meeting_parse_messages(*, meeting_notes: str) -> list[dict[str, str]]:
     user_prompt = (
         "Parse the meeting notes into structured JSON with fields like attendees, "
         "company, pains, objections, next_steps, and crm_fields.\n\n"
-        f"Meeting notes:\n{meeting_notes}"
+        f"Customer profile:\n{customer_profile_text}\n\n"
+        f"Meeting notes:\n{meeting_note_text}"
     )
     return _build_messages(system_prompt, user_prompt)
 
 
 def build_lead_scoring_messages(
     *,
-    lead_context: str,
-    meeting_parse_json: str,
+    customer_profile_text: str,
+    meeting_summary: str,
+    retrieved_docs: str,
+    account_memory: str,
 ) -> list[dict[str, str]]:
     system_prompt = (
         "You are a sales copilot. Score leads from the provided evidence only. "
@@ -33,25 +37,32 @@ def build_lead_scoring_messages(
     user_prompt = (
         "Evaluate the lead and produce JSON with a numeric score, short reasons, "
         "and the evidence used.\n\n"
-        f"Lead context:\n{lead_context}\n\n"
-        f"Meeting parse JSON:\n{meeting_parse_json}"
+        f"Customer profile:\n{customer_profile_text}\n\n"
+        f"Meeting summary:\n{meeting_summary}\n\n"
+        "Retrieved context:\n"
+        f"{retrieved_docs}\n\n"
+        "Account memory:\n"
+        f"{account_memory}"
     )
     return _build_messages(system_prompt, user_prompt)
 
 
 def build_followup_plan_messages(
     *,
-    lead_context: str,
-    meeting_parse_json: str,
+    meeting_summary: str,
+    opportunity_stage: str,
+    risk_flags: list[str],
 ) -> list[dict[str, str]]:
     system_prompt = (
         "You are a sales copilot. Create a follow-up plan from the evidence only. "
         "Return valid JSON only. Do not hallucinate."
     )
     user_prompt = (
-        "Write a concise follow-up plan in JSON with next actions, owners, and timing.\n\n"
-        f"Lead context:\n{lead_context}\n\n"
-        f"Meeting parse JSON:\n{meeting_parse_json}"
+        "Write a concise follow-up plan in JSON with next actions, owners, timing, "
+        "and stage-aware guidance.\n\n"
+        f"Meeting summary:\n{meeting_summary}\n\n"
+        f"Opportunity stage:\n{opportunity_stage}\n\n"
+        f"Risk flags:\n{', '.join(risk_flags) if risk_flags else 'None'}"
     )
     return _build_messages(system_prompt, user_prompt)
 
@@ -96,4 +107,3 @@ def build_dashboard_summary_messages(
     if crm_update_json:
         user_prompt += f"\n\nCRM update JSON:\n{crm_update_json}"
     return _build_messages(system_prompt, user_prompt)
-

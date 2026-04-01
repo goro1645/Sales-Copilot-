@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
-from typing import Any, Sequence
+from typing import Any
 
 
 class BaseLLMClient(ABC):
@@ -10,8 +8,7 @@ class BaseLLMClient(ABC):
     @abstractmethod
     def complete(
         self,
-        messages: Sequence[dict[str, Any]],
-        response_format: dict[str, Any] | None = None,
+        messages: list[dict],
+        response_format: dict | None = None,
     ) -> str:
         """把对话消息发给模型，并返回纯文本结果。"""
-

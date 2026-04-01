@@ -9,36 +9,44 @@ from sales_copilot.prompts import (
 
 def test_build_meeting_parse_messages_requests_json_and_uses_notes():
     messages = build_meeting_parse_messages(
-        meeting_notes="Discussed pricing, timeline, and security review.",
+        customer_profile_text="Enterprise buyer profile with security requirements.",
+        meeting_note_text="Discussed pricing, timeline, and security review.",
     )
 
     assert messages[0]["role"] == "system"
     assert "json" in messages[0]["content"].lower()
     assert "do not invent" in messages[0]["content"].lower()
+    assert "enterprise buyer profile" in messages[1]["content"].lower()
     assert "pricing" in messages[1]["content"]
 
 
 def test_build_lead_scoring_messages_mentions_json_and_input_context():
     messages = build_lead_scoring_messages(
-        lead_context="Enterprise account with budget approved.",
-        meeting_parse_json='{"pain_points":["integration"],"next_steps":["demo"]}',
+        customer_profile_text="Enterprise account with budget approved.",
+        meeting_summary="They want a pilot next month.",
+        retrieved_docs='{"pain_points":["integration"],"next_steps":["demo"]}',
+        account_memory="Prior call showed strong technical fit.",
     )
 
     assert messages[0]["role"] == "system"
     assert "json" in messages[0]["content"].lower()
     assert "budget approved" in messages[1]["content"]
+    assert "retrieved context" in messages[1]["content"].lower()
+    assert "account memory" in messages[1]["content"].lower()
     assert "integration" in messages[1]["content"]
 
 
 def test_build_followup_plan_messages_mentions_no_hallucination():
     messages = build_followup_plan_messages(
-        lead_context="Interested in a pilot.",
-        meeting_parse_json='{"next_steps":["send proposal"]}',
+        meeting_summary="Interested in a pilot.",
+        opportunity_stage="Proposal",
+        risk_flags=["pricing risk", "no champion"],
     )
 
     assert messages[0]["role"] == "system"
     assert "do not hallucinate" in messages[0]["content"].lower()
-    assert "send proposal" in messages[1]["content"]
+    assert "proposal" in messages[1]["content"].lower()
+    assert "pricing risk" in messages[1]["content"].lower()
 
 
 def test_build_crm_update_messages_carries_current_crm_state():

@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Any, Sequence
+from typing import Any
 
 import requests
 
@@ -20,13 +18,15 @@ class DeepSeekClient(BaseLLMClient):
 
     def complete(
         self,
-        messages: Sequence[dict[str, Any]],
-        response_format: dict[str, Any] | None = None,
+        messages: list[dict],
+        response_format: dict | None = None,
     ) -> str:
         url = f"{self.base_url}/chat/completions"
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": list(messages),
+            "temperature": 0.2,
+            "stream": False,
         }
         if response_format is not None:
             payload["response_format"] = response_format
@@ -36,8 +36,7 @@ class DeepSeekClient(BaseLLMClient):
             "Content-Type": "application/json",
         }
 
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"]
-

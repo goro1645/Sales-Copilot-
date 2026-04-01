@@ -22,13 +22,21 @@ def _stub_node(step_name: str) -> Callable[[SalesCopilotState], dict[str, Any]]:
     return _node
 
 
+def _coerce_lead_score(raw_lead_score: Any) -> int | None:
+    try:
+        return int(raw_lead_score)
+    except (TypeError, ValueError):
+        return None
+
+
 def route_after_lead_evaluation(state: SalesCopilotState) -> str:
     meeting_summary = state.get("meeting_summary") or {}
     risk_flags = state.get("risk_flags") or []
-    lead_score = int(state.get("lead_score", 0))
+    lead_score = _coerce_lead_score(state.get("lead_score", 0))
 
-    # 空摘要或明确缺失关键信息时，先走补充信息分支，避免过早进入跟进或 CRM 写回。
-    if not meeting_summary or risk_flags == ["missing_required_facts"]:
+    # 按当前 spec，missing_required_facts 只允许精确等于这个列表时命中，避免被误读成“包含即命中”。
+    # 空摘要或解析失败时也先走补充信息分支，避免过早进入跟进或 CRM 写回。
+    if not meeting_summary or lead_score is None or risk_flags == ["missing_required_facts"]:
         return "need_more_info"
     if lead_score < 50:
         return "low_priority_nurture"

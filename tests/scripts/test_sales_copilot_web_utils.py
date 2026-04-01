@@ -105,6 +105,12 @@ def test_normalize_task_rows_handles_mixed_task_payloads():
     ]
 
 
+def test_normalize_task_rows_ignores_bad_follow_up_plan_shapes():
+    rows = normalize_task_rows({"follow_up_plan": "oops"})
+
+    assert rows == []
+
+
 def test_clear_run_result_state_clears_previous_result_and_sets_error():
     session_state = {"last_result": {"lead_score": 88}, "last_error": ""}
 

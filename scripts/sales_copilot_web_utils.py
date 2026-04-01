@@ -155,7 +155,14 @@ def _normalize_task_item(item: Any, index: int) -> dict[str, Any] | None:
 def normalize_task_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
     """把任务列表整理成表格行，非字典项直接跳过。"""
 
-    tasks = result.get("task_payload") or (result.get("follow_up_plan") or {}).get("tasks") or []
+    tasks = result.get("task_payload")
+    if not tasks:
+        follow_up_plan = result.get("follow_up_plan")
+        if isinstance(follow_up_plan, dict):
+            tasks = follow_up_plan.get("tasks")
+        else:
+            tasks = []
+    tasks = tasks or []
     rows: list[dict[str, Any]] = []
     for index, item in enumerate(tasks, start=1):
         normalized = _normalize_task_item(item, index)

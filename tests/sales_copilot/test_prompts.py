@@ -1,3 +1,5 @@
+import inspect
+
 from sales_copilot.prompts import (
     build_crm_update_messages,
     build_dashboard_summary_messages,
@@ -21,11 +23,16 @@ def test_build_meeting_parse_messages_requests_json_and_uses_notes():
 
 
 def test_build_lead_scoring_messages_mentions_json_and_input_context():
+    assert str(inspect.signature(build_lead_scoring_messages)) == (
+        "(*, customer_profile_text: str, meeting_summary: dict, retrieved_docs: list[dict], "
+        "account_memory: dict) -> list[dict[str, str]]"
+    )
+
     messages = build_lead_scoring_messages(
         customer_profile_text="Enterprise account with budget approved.",
-        meeting_summary="They want a pilot next month.",
-        retrieved_docs='{"pain_points":["integration"],"next_steps":["demo"]}',
-        account_memory="Prior call showed strong technical fit.",
+        meeting_summary={"summary": "They want a pilot next month."},
+        retrieved_docs=[{"type": "doc", "content": "integration"}, {"type": "note", "content": "demo"}],
+        account_memory={"prior_call": "Strong technical fit."},
     )
 
     assert messages[0]["role"] == "system"
@@ -37,8 +44,12 @@ def test_build_lead_scoring_messages_mentions_json_and_input_context():
 
 
 def test_build_followup_plan_messages_mentions_no_hallucination():
+    assert str(inspect.signature(build_followup_plan_messages)) == (
+        "(*, meeting_summary: dict, opportunity_stage: str, risk_flags: list[str]) -> list[dict[str, str]]"
+    )
+
     messages = build_followup_plan_messages(
-        meeting_summary="Interested in a pilot.",
+        meeting_summary={"summary": "Interested in a pilot."},
         opportunity_stage="Proposal",
         risk_flags=["pricing risk", "no champion"],
     )

@@ -26,9 +26,9 @@ def build_meeting_parse_messages(
 def build_lead_scoring_messages(
     *,
     customer_profile_text: str,
-    meeting_summary: str,
-    retrieved_docs: str,
-    account_memory: str,
+    meeting_summary: dict,
+    retrieved_docs: list[dict],
+    account_memory: dict,
 ) -> list[dict[str, str]]:
     system_prompt = (
         "You are a sales copilot. Score leads from the provided evidence only. "
@@ -40,16 +40,16 @@ def build_lead_scoring_messages(
         f"Customer profile:\n{customer_profile_text}\n\n"
         f"Meeting summary:\n{meeting_summary}\n\n"
         "Retrieved context:\n"
-        f"{retrieved_docs}\n\n"
+        f"{str(retrieved_docs)}\n\n"
         "Account memory:\n"
-        f"{account_memory}"
+        f"{str(account_memory)}"
     )
     return _build_messages(system_prompt, user_prompt)
 
 
 def build_followup_plan_messages(
     *,
-    meeting_summary: str,
+    meeting_summary: dict,
     opportunity_stage: str,
     risk_flags: list[str],
 ) -> list[dict[str, str]]:

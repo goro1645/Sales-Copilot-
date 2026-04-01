@@ -149,7 +149,7 @@ def search_account_history(db_path, account_id: int) -> list[dict]:
 def get_open_tasks(db_path, account_id: int) -> list[dict]:
     account = storage.get_account_by_id(db_path, account_id)
     if account is None:
-        raise ValueError(f"Account {account_id} does not exist")
+        return []
 
     tasks = [row for row in storage.list_tasks(db_path) if row["account_id"] == account_id and row["status"] == "open"]
     return sorted(tasks, key=lambda row: (row["due_at"], row["id"]))

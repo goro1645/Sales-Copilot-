@@ -144,17 +144,11 @@ def test_search_account_history_and_open_tasks(tmp_path: Path):
     assert open_tasks[0]["title"] == "Send security checklist"
 
 
-def test_get_open_tasks_raises_for_missing_account(tmp_path: Path):
+def test_get_open_tasks_returns_empty_list_for_missing_account(tmp_path: Path):
     db_path = tmp_path / "sales_copilot.db"
     init_storage(db_path)
 
-    try:
-        get_open_tasks(db_path, 999)
-        raised = False
-    except ValueError:
-        raised = True
-
-    assert raised
+    assert get_open_tasks(db_path, 999) == []
 
 
 def test_seed_knowledge_chunks_dedupes_rows_in_same_batch(tmp_path: Path):

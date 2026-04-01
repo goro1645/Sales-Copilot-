@@ -33,7 +33,8 @@ def init_storage(db_path) -> None:
                 meeting_summary_json TEXT NOT NULL,
                 lead_score INTEGER NOT NULL,
                 priority TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(account_id, id)
             );
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,7 +45,8 @@ def init_storage(db_path) -> None:
                 priority TEXT NOT NULL,
                 due_at TEXT NOT NULL,
                 status TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (account_id, meeting_id) REFERENCES meeting_records(account_id, id)
             );
             CREATE TABLE IF NOT EXISTS account_memory (
                 account_id INTEGER PRIMARY KEY REFERENCES accounts(id),
@@ -63,7 +65,8 @@ def init_storage(db_path) -> None:
                 update_type TEXT NOT NULL,
                 before_json TEXT NOT NULL,
                 after_json TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (account_id, meeting_id) REFERENCES meeting_records(account_id, id)
             );
             CREATE TABLE IF NOT EXISTS knowledge_chunks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

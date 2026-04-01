@@ -84,7 +84,7 @@ def test_storage_rejects_updates_for_missing_account(tmp_path: Path):
     db_path = tmp_path / "sales_copilot.db"
     init_storage(db_path)
 
-    try:
+    with pytest.raises(ValueError):
         update_account_stage_and_status(
             db_path,
             account_id=999,
@@ -92,10 +92,6 @@ def test_storage_rejects_updates_for_missing_account(tmp_path: Path):
             opportunity_stage="proposal",
             last_contact_at="2026-04-01",
         )
-    except ValueError as exc:
-        assert "999" in str(exc)
-    else:
-        raise AssertionError("Expected ValueError for missing account")
 
 
 def test_storage_supports_meetings_tasks_memory_and_crm_updates(tmp_path: Path):
@@ -259,6 +255,102 @@ def test_storage_rejects_invalid_foreign_keys(tmp_path: Path):
         )
 
     assert meeting_id == 1
+
+
+def test_storage_rejects_task_cross_account_mismatch(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    account_one_id = save_account(
+        db_path,
+        {
+            "name": "Acme Robotics",
+            "industry": "Manufacturing",
+            "size_segment": "Mid-Market",
+            "status": "active",
+            "opportunity_stage": "discovery",
+        },
+    )
+    account_two_id = save_account(
+        db_path,
+        {
+            "name": "Northwind Traders",
+            "industry": "Retail",
+            "size_segment": "Enterprise",
+            "status": "active",
+            "opportunity_stage": "proposal",
+        },
+    )
+    meeting_id = save_meeting_record(
+        db_path,
+        {
+            "account_id": account_two_id,
+            "meeting_title": "Proposal Review",
+            "meeting_note_raw": "Discussed pricing.",
+            "meeting_summary_json": '{"confirmed_needs": ["pricing"]}',
+            "lead_score": 75,
+            "priority": "medium",
+        },
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        save_task_record(
+            db_path,
+            {
+                "account_id": account_one_id,
+                "meeting_id": meeting_id,
+                "title": "Cross-account task",
+                "description": "Should not attach to another account's meeting",
+                "priority": "low",
+                "due_at": "2026-04-03",
+                "status": "open",
+            },
+        )
+
+
+def test_storage_rejects_crm_update_cross_account_mismatch(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    account_one_id = save_account(
+        db_path,
+        {
+            "name": "Acme Robotics",
+            "industry": "Manufacturing",
+            "size_segment": "Mid-Market",
+            "status": "active",
+            "opportunity_stage": "discovery",
+        },
+    )
+    account_two_id = save_account(
+        db_path,
+        {
+            "name": "Northwind Traders",
+            "industry": "Retail",
+            "size_segment": "Enterprise",
+            "status": "active",
+            "opportunity_stage": "proposal",
+        },
+    )
+    meeting_id = save_meeting_record(
+        db_path,
+        {
+            "account_id": account_two_id,
+            "meeting_title": "Proposal Review",
+            "meeting_note_raw": "Discussed pricing.",
+            "meeting_summary_json": '{"confirmed_needs": ["pricing"]}',
+            "lead_score": 75,
+            "priority": "medium",
+        },
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        save_crm_update(
+            db_path,
+            {
+                "account_id": account_one_id,
+                "meeting_id": meeting_id,
+                "update_type": "account_stage",
+                "before_json": '{"opportunity_stage": "discovery"}',
+                "after_json": '{"opportunity_stage": "proposal"}',
+            },
+        )
 
 
 def test_storage_overwrites_account_memory_on_second_upsert(tmp_path: Path):

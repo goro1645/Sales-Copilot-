@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import pytest
 
@@ -86,6 +87,30 @@ def test_seed_helpers_and_search_wrappers(tmp_path: Path):
     assert len(stored_chunks) == len(sample_product_chunks()) + len(sample_playbook_chunks())
     assert product_results
     assert playbook_results
+
+
+def test_search_product_knowledge_returns_seeded_product_section(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    init_storage(db_path)
+    seed_knowledge_chunks(db_path, sample_product_chunks())
+
+    rows = search_product_knowledge(db_path, "private deployment and sso", top_k=1)
+
+    assert rows[0]["source_type"] == "product"
+    assert rows[0]["source_name"] == "Sales Copilot Product Brief"
+    assert json.loads(rows[0]["retrieval_metadata_json"])["section"] == "deployment"
+
+
+def test_search_sales_playbook_returns_seeded_playbook_section(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    init_storage(db_path)
+    seed_knowledge_chunks(db_path, sample_playbook_chunks())
+
+    rows = search_sales_playbook(db_path, "security review checklist and technical demo", top_k=1)
+
+    assert rows[0]["source_type"] == "playbook"
+    assert rows[0]["source_name"] == "Enterprise Sales Playbook"
+    assert json.loads(rows[0]["retrieval_metadata_json"])["section"] == "objections"
 
 
 def test_search_account_history_and_open_tasks(tmp_path: Path):

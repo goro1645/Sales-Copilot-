@@ -152,7 +152,16 @@ def get_open_tasks(db_path, account_id: int) -> list[dict]:
         return []
 
     tasks = [row for row in storage.list_tasks(db_path) if row["account_id"] == account_id and row["status"] == "open"]
-    return sorted(tasks, key=lambda row: (row["due_at"], row["id"]))
+    ordered_tasks = sorted(tasks, key=lambda row: (row["due_at"], row["id"]))
+    deduped_tasks: list[dict] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for task in ordered_tasks:
+        key = (task["title"], task["due_at"])
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped_tasks.append(task)
+    return deduped_tasks
 
 
 def _normalize_crm_after_payload(after: dict, *, meeting_id: int, before: dict) -> dict:

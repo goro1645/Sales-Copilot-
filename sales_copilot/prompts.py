@@ -1,3 +1,6 @@
+import json
+
+
 def _build_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": system_prompt},
@@ -11,12 +14,20 @@ def build_meeting_parse_messages(
     meeting_note_text: str,
 ) -> list[dict[str, str]]:
     system_prompt = (
-        "You are a sales copilot. Extract only facts that appear in the notes. "
+        "You are a sales copilot. The customer profile is background only for disambiguation, "
+        "not a source of facts. Extract facts from the meeting note first. "
         "Return valid JSON only. Do not invent missing details."
     )
     user_prompt = (
-        "Parse the meeting notes into structured JSON with fields like attendees, "
-        "company, pains, objections, next_steps, and crm_fields.\n\n"
+        "Parse the meeting notes into structured JSON with fields:\n"
+        "- account_name\n"
+        "- customer_roles\n"
+        "- confirmed_needs\n"
+        "- objections\n"
+        "- next_steps\n"
+        "- budget_signals\n"
+        "- timeline_signals\n"
+        "- competitors\n\n"
         f"Customer profile:\n{customer_profile_text}\n\n"
         f"Meeting notes:\n{meeting_note_text}"
     )
@@ -38,11 +49,12 @@ def build_lead_scoring_messages(
         "Evaluate the lead and produce JSON with a numeric score, short reasons, "
         "and the evidence used.\n\n"
         f"Customer profile:\n{customer_profile_text}\n\n"
-        f"Meeting summary:\n{meeting_summary}\n\n"
+        "Meeting summary:\n"
+        f"{json.dumps(meeting_summary, ensure_ascii=False)}\n\n"
         "Retrieved context:\n"
-        f"{str(retrieved_docs)}\n\n"
+        f"{json.dumps(retrieved_docs, ensure_ascii=False)}\n\n"
         "Account memory:\n"
-        f"{str(account_memory)}"
+        f"{json.dumps(account_memory, ensure_ascii=False)}"
     )
     return _build_messages(system_prompt, user_prompt)
 
@@ -60,7 +72,8 @@ def build_followup_plan_messages(
     user_prompt = (
         "Write a concise follow-up plan in JSON with next actions, owners, timing, "
         "and stage-aware guidance.\n\n"
-        f"Meeting summary:\n{meeting_summary}\n\n"
+        "Meeting summary:\n"
+        f"{json.dumps(meeting_summary, ensure_ascii=False)}\n\n"
         f"Opportunity stage:\n{opportunity_stage}\n\n"
         f"Risk flags:\n{', '.join(risk_flags) if risk_flags else 'None'}"
     )

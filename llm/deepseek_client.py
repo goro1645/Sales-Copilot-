@@ -39,4 +39,26 @@ class DeepSeekClient(BaseLLMClient):
         response = requests.post(url, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        return self._extract_content(data)
+
+    def _extract_content(self, data: Any) -> str:
+        if not isinstance(data, dict):
+            raise ValueError("DeepSeek response must be a dict with choices")
+
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("DeepSeek response has empty or invalid choices")
+
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise ValueError("DeepSeek response choice must be a dict")
+
+        message = first_choice.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("DeepSeek response choice is missing message")
+
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("DeepSeek response message is missing content")
+
+        return content

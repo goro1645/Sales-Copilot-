@@ -64,3 +64,63 @@ def test_deepseek_client_forwards_response_format(monkeypatch):
 
     assert result == "structured"
     assert captured["json"]["response_format"] == {"type": "json_object"}
+
+
+def test_deepseek_client_raises_clear_error_for_empty_choices(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": []}
+
+    monkeypatch.setattr("llm.deepseek_client.requests.post", lambda *args, **kwargs: FakeResponse())
+
+    client = DeepSeekClient(api_key="test-key")
+
+    try:
+        client.complete([{"role": "user", "content": "Hello"}])
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "choices" in str(exc).lower()
+        assert "empty" in str(exc).lower()
+
+
+def test_deepseek_client_raises_clear_error_for_missing_content(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {}}]}
+
+    monkeypatch.setattr("llm.deepseek_client.requests.post", lambda *args, **kwargs: FakeResponse())
+
+    client = DeepSeekClient(api_key="test-key")
+
+    try:
+        client.complete([{"role": "user", "content": "Hello"}])
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "content" in str(exc).lower()
+        assert "missing" in str(exc).lower()
+
+
+def test_deepseek_client_raises_clear_error_for_unexpected_response_shape(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return ["not", "a", "dict"]
+
+    monkeypatch.setattr("llm.deepseek_client.requests.post", lambda *args, **kwargs: FakeResponse())
+
+    client = DeepSeekClient(api_key="test-key")
+
+    try:
+        client.complete([{"role": "user", "content": "Hello"}])
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "response" in str(exc).lower()
+        assert "dict" in str(exc).lower()

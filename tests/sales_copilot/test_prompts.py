@@ -17,7 +17,16 @@ def test_build_meeting_parse_messages_requests_json_and_uses_notes():
 
     assert messages[0]["role"] == "system"
     assert "json" in messages[0]["content"].lower()
-    assert "do not invent" in messages[0]["content"].lower()
+    assert "background" in messages[0]["content"].lower()
+    assert "disambiguation" in messages[0]["content"].lower()
+    assert "account_name" in messages[1]["content"]
+    assert "customer_roles" in messages[1]["content"]
+    assert "confirmed_needs" in messages[1]["content"]
+    assert "objections" in messages[1]["content"]
+    assert "next_steps" in messages[1]["content"]
+    assert "budget_signals" in messages[1]["content"]
+    assert "timeline_signals" in messages[1]["content"]
+    assert "competitors" in messages[1]["content"]
     assert "enterprise buyer profile" in messages[1]["content"].lower()
     assert "pricing" in messages[1]["content"]
 
@@ -40,7 +49,9 @@ def test_build_lead_scoring_messages_mentions_json_and_input_context():
     assert "budget approved" in messages[1]["content"]
     assert "retrieved context" in messages[1]["content"].lower()
     assert "account memory" in messages[1]["content"].lower()
-    assert "integration" in messages[1]["content"]
+    assert '"summary": "They want a pilot next month."' in messages[1]["content"]
+    assert '"type": "doc"' in messages[1]["content"]
+    assert '"prior_call": "Strong technical fit."' in messages[1]["content"]
 
 
 def test_build_followup_plan_messages_mentions_no_hallucination():
@@ -58,6 +69,7 @@ def test_build_followup_plan_messages_mentions_no_hallucination():
     assert "do not hallucinate" in messages[0]["content"].lower()
     assert "proposal" in messages[1]["content"].lower()
     assert "pricing risk" in messages[1]["content"].lower()
+    assert '"summary": "Interested in a pilot."' in messages[1]["content"]
 
 
 def test_build_crm_update_messages_carries_current_crm_state():

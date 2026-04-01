@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+import html
 from collections.abc import Iterable
+from typing import Any
+
+
+def escape_html_text(value: Any) -> str:
+    """把会进 HTML 的内容先转义，避免页面把用户输入当成标签。"""
+
+    return html.escape("" if value is None else str(value), quote=True)
 
 
 def _first_present(*values):
@@ -32,7 +40,7 @@ def _format_list_text(value, default: str = "None") -> str:
         return text or default
     if isinstance(value, dict):
         items = list(value.values())
-    elif isinstance(value, Iterable):
+    elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
         items = list(value)
     else:
         items = [value]
@@ -50,10 +58,117 @@ def _format_count(value) -> str:
         return str(value)
     if isinstance(value, str):
         text = value.strip()
-        return text if text.isdigit() else "1"
+        return text if text.isdigit() else "0"
     if isinstance(value, (list, tuple, set, dict)):
         return str(len(value))
-    return "1"
+    return "0"
+
+
+def build_card_html(label: str, value: str, note: str = "") -> str:
+    """把卡片文案拼成 HTML，动态值先转义，页面才能安全渲染。"""
+
+    return (
+        '<div class="card-shell">'
+        f'<div class="card-label">{escape_html_text(label)}</div>'
+        f'<div class="card-value">{escape_html_text(value)}</div>'
+        f'<div class="card-note">{escape_html_text(note)}</div>'
+        "</div>"
+    )
+
+
+def build_summary_html(summary: str) -> str:
+    """把摘要包成安全的 HTML 片段。"""
+
+    return f'<div class="subtle-copy">{escape_html_text(summary)}</div>'
+
+
+def _normalize_text(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip() or default
+    return str(value)
+
+
+def _normalize_list_like(value: Any, *, default: list[str] | None = None) -> list[str]:
+    if default is None:
+        default = []
+    if value is None:
+        return list(default)
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else list(default)
+    if isinstance(value, dict):
+        values = list(value.values())
+    elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        values = list(value)
+    else:
+        values = [value]
+
+    cleaned = []
+    for item in values:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text:
+            cleaned.append(text)
+    return cleaned or list(default)
+
+
+def _normalize_context_item(item: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    matched_terms = _normalize_list_like(item.get("matched_terms"))
+    return {
+        "Rank": index,
+        "Source": _normalize_text(item.get("source_name") or item.get("source_type"), "Context"),
+        "Score": item.get("score", ""),
+        "Matched Terms": ", ".join(matched_terms) if matched_terms else "None",
+        "Snippet": _normalize_text(item.get("chunk_text") or item.get("text") or item.get("description"), "")[:220],
+    }
+
+
+def normalize_context_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """把检索结果整理成表格行，脏数据也要尽量能显示。"""
+
+    rows: list[dict[str, Any]] = []
+    for index, item in enumerate(result.get("retrieved_docs") or [], start=1):
+        normalized = _normalize_context_item(item, index)
+        if normalized is not None:
+            rows.append(normalized)
+    return rows
+
+
+def _normalize_task_item(item: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    return {
+        "Rank": index,
+        "Title": _normalize_text(item.get("title"), "Follow up"),
+        "Priority": _normalize_text(item.get("priority"), "medium"),
+        "Owner": _normalize_text(item.get("owner"), "Sales"),
+        "Due": _normalize_text(item.get("due_at") or item.get("due"), ""),
+        "Status": _normalize_text(item.get("status"), "open"),
+    }
+
+
+def normalize_task_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """把任务列表整理成表格行，非字典项直接跳过。"""
+
+    tasks = result.get("task_payload") or (result.get("follow_up_plan") or {}).get("tasks") or []
+    rows: list[dict[str, Any]] = []
+    for index, item in enumerate(tasks, start=1):
+        normalized = _normalize_task_item(item, index)
+        if normalized is not None:
+            rows.append(normalized)
+    return rows
+
+
+def clear_run_result_state(session_state: dict[str, Any], error_message: str) -> None:
+    """失败时同时清空旧结果，避免页面还显示上一次成功的数据。"""
+
+    session_state["last_result"] = None
+    session_state["last_error"] = error_message
 
 
 def build_dashboard_cards(result: dict) -> dict[str, str]:

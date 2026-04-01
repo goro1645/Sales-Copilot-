@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 import streamlit as st
 
@@ -12,7 +11,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from llm.deepseek_client import DeepSeekClient
 from sales_copilot.runner import run_sales_copilot
-from scripts.sales_copilot_web_utils import build_dashboard_cards
+from scripts.sales_copilot_web_utils import (
+    build_card_html,
+    build_dashboard_cards,
+    build_summary_html,
+    clear_run_result_state,
+    normalize_context_rows,
+    normalize_task_rows,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +35,7 @@ They want a follow-up plan by Friday, asked about budget impact, and want the im
 
 
 def _apply_page_style() -> None:
-    """简单加一点企业工作台的质感，避免页面看起来像普通聊天框。"""
+    """给页面加一点企业工作台的质感，避免看起来像普通聊天框。"""
 
     st.markdown(
         """
@@ -45,7 +51,6 @@ def _apply_page_style() -> None:
                 --ink: #eef4ff;
                 --muted: #a8bbd6;
                 --accent: #69d2ff;
-                --accent-2: #8af7c1;
             }
 
             .stApp {
@@ -66,7 +71,7 @@ def _apply_page_style() -> None:
                 padding-bottom: 2.5rem;
             }
 
-            .hero-shell, .panel-shell, .card-shell, .tab-shell {
+            .hero-shell, .panel-shell, .tab-shell {
                 background: var(--panel);
                 border: 1px solid var(--border);
                 border-radius: 24px;
@@ -114,9 +119,13 @@ def _apply_page_style() -> None:
             }
 
             .card-shell {
+                background: var(--panel-strong);
+                border: 1px solid var(--border);
+                border-radius: 24px;
+                box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+                backdrop-filter: blur(14px);
                 padding: 0.9rem 1rem;
                 min-height: 96px;
-                background: var(--panel-strong);
             }
 
             .card-label {
@@ -188,59 +197,14 @@ def _ensure_session_defaults() -> None:
 def _build_llm_client(*, api_key: str, base_url: str, model: str):
     if not api_key.strip():
         return None
-    return DeepSeekClient(api_key=api_key.strip(), base_url=base_url.strip() or "https://api.deepseek.com", model=model.strip() or "deepseek-chat")
-
-
-def _render_card(label: str, value: str, note: str = "") -> None:
-    st.markdown(
-        f"""
-        <div class="card-shell">
-            <div class="card-label">{label}</div>
-            <div class="card-value">{value}</div>
-            <div class="card-note">{note}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    return DeepSeekClient(
+        api_key=api_key.strip(),
+        base_url=base_url.strip() or "https://api.deepseek.com",
+        model=model.strip() or "deepseek-chat",
     )
 
 
-def _normalize_context_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for index, item in enumerate(result.get("retrieved_docs") or [], start=1):
-        if not isinstance(item, dict):
-            continue
-        rows.append(
-            {
-                "Rank": index,
-                "Source": item.get("source_name") or item.get("source_type") or "Context",
-                "Score": item.get("score", ""),
-                "Matched Terms": ", ".join(item.get("matched_terms", []) or []) or "None",
-                "Snippet": str(item.get("chunk_text") or item.get("text") or item.get("description") or "")[:220],
-            }
-        )
-    return rows
-
-
-def _normalize_task_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
-    tasks = result.get("task_payload") or (result.get("follow_up_plan") or {}).get("tasks") or []
-    rows: list[dict[str, Any]] = []
-    for index, item in enumerate(tasks, start=1):
-        if not isinstance(item, dict):
-            continue
-        rows.append(
-            {
-                "Rank": index,
-                "Title": item.get("title", "Follow up"),
-                "Priority": item.get("priority", "medium"),
-                "Owner": item.get("owner", "Sales"),
-                "Due": item.get("due_at", item.get("due", "")),
-                "Status": item.get("status", "open"),
-            }
-        )
-    return rows
-
-
-def _render_dashboard(result: dict[str, Any]) -> None:
+def _render_dashboard(result: dict) -> None:
     cards = build_dashboard_cards(result)
     st.markdown('<div class="panel-shell" style="padding: 1rem 1rem 0.9rem 1rem;">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Lead Dashboard</div>', unsafe_allow_html=True)
@@ -253,18 +217,16 @@ def _render_dashboard(result: dict[str, Any]) -> None:
             index = start + offset
             with col:
                 note = "Dashboard summary" if labels[index] == "Account" else "Workspace metric"
-                _render_card(labels[index], values[index], note)
+                st.markdown(build_card_html(labels[index], values[index], note), unsafe_allow_html=True)
 
     dashboard_output = result.get("dashboard_output") or {}
+    summary_text = dashboard_output.get("summary") or (result.get("follow_up_plan") or {}).get("summary") or "No summary yet."
     st.markdown("#### Executive Summary", unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="subtle-copy">{dashboard_output.get("summary") or (result.get("follow_up_plan") or {}).get("summary") or "No summary yet."}</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(build_summary_html(summary_text), unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def _render_crm_and_tasks(result: dict[str, Any]) -> None:
+def _render_crm_and_tasks(result: dict) -> None:
     st.markdown('<div class="panel-shell" style="padding: 1rem 1rem 0.9rem 1rem;">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">CRM / Tasks</div>', unsafe_allow_html=True)
 
@@ -279,7 +241,7 @@ def _render_crm_and_tasks(result: dict[str, Any]) -> None:
     st.json(crm_preview, expanded=False)
 
     st.markdown("**Tasks**")
-    task_rows = _normalize_task_rows(result)
+    task_rows = normalize_task_rows(result)
     if task_rows:
         st.dataframe(task_rows, use_container_width=True, hide_index=True)
     else:
@@ -288,8 +250,8 @@ def _render_crm_and_tasks(result: dict[str, Any]) -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def _render_bottom_tabs(result: dict[str, Any]) -> None:
-    retrieved_rows = _normalize_context_rows(result)
+def _render_bottom_tabs(result: dict) -> None:
+    retrieved_rows = normalize_context_rows(result)
     memory = result.get("account_memory") or {}
     workflow_log = result.get("workflow_log") or []
 
@@ -362,7 +324,7 @@ def main() -> None:
     if run_pressed:
         llm_client = _build_llm_client(api_key=api_key, base_url=api_base_url, model=api_model)
         if llm_client is None:
-            st.session_state["last_error"] = "请先在侧边栏填写 DeepSeek API key，再运行工作流。"
+            clear_run_result_state(st.session_state, "请先在侧边栏填写 DeepSeek API key，再运行工作流。")
         else:
             try:
                 st.session_state["last_error"] = ""
@@ -373,7 +335,7 @@ def main() -> None:
                     llm_client=llm_client,
                 )
             except Exception as exc:  # pragma: no cover - UI side error surfacing
-                st.session_state["last_error"] = f"运行失败: {exc}"
+                clear_run_result_state(st.session_state, f"运行失败: {exc}")
 
     result = st.session_state.get("last_result") or {}
 

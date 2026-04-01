@@ -19,6 +19,9 @@ from sales_copilot.storage import (
     get_account_by_id,
     get_account_memory,
     list_accounts,
+    list_crm_updates,
+    list_meeting_records,
+    list_tasks,
     save_account,
     save_meeting_record,
     save_task_record,
@@ -89,6 +92,19 @@ def _normalize_list(value: Any) -> list[str]:
     return [text] if text else []
 
 
+def _looks_generic_account_name(value: str) -> bool:
+    text = value.strip().lower()
+    if not text:
+        return True
+    if text.endswith("."):
+        return True
+    generic_markers = ("customer profile", "profile", "customer", "company", "business", "account", "client")
+    if any(marker in text for marker in generic_markers):
+        # 这里只拦很明显的占位文本，避免把真实公司名误判得太狠。
+        return True
+    return False
+
+
 def _get_or_create_account(db_path: Path | str, *, account_name: str) -> int:
     normalized_name = account_name.strip().lower()
     # 先复用同名账号，避免重复运行时把同一个客户建成多条记录。
@@ -106,6 +122,71 @@ def _get_or_create_account(db_path: Path | str, *, account_name: str) -> int:
             "opportunity_stage": "discovery",
         },
     )
+
+
+def _resolve_account_name(
+    state: SalesCopilotState,
+    *,
+    database_path: Path | str | None = None,
+) -> str:
+    # 先读已经落库的账号名，能避免同一条线索在 UI 里被“简介句子”误当成名称。
+    account_id = state.get("account_id")
+    if database_path is not None and account_id:
+        account = get_account_by_id(database_path, account_id)
+        if account and account.get("name"):
+            return str(account["name"])
+
+    structured_name = str((state.get("customer_profile_structured") or {}).get("account_name", "")).strip()
+    if structured_name and not _looks_generic_account_name(structured_name):
+        return structured_name
+
+    summary_name = str((state.get("meeting_summary") or {}).get("account_name", "")).strip()
+    if summary_name:
+        return summary_name
+
+    if structured_name:
+        return structured_name
+
+    return _infer_account_name(state.get("customer_profile_raw", ""))
+
+
+def _find_existing_meeting(db_path: Path | str, *, account_id: int, meeting_note_raw: str) -> int | None:
+    for row in list_meeting_records(db_path):
+        if row["account_id"] == account_id and row["meeting_note_raw"] == meeting_note_raw:
+            return row["id"]
+    return None
+
+
+def _find_existing_task(
+    db_path: Path | str,
+    *,
+    account_id: int,
+    meeting_id: int,
+    title: str,
+    due_at: str,
+) -> int | None:
+    for row in list_tasks(db_path):
+        if (
+            row["account_id"] == account_id
+            and row["meeting_id"] == meeting_id
+            and row["title"] == title
+            and row["due_at"] == due_at
+        ):
+            return row["id"]
+    return None
+
+
+def _find_existing_crm_update(
+    db_path: Path | str,
+    *,
+    account_id: int,
+    meeting_id: int,
+    after_json: str,
+) -> int | None:
+    for row in list_crm_updates(db_path):
+        if row["account_id"] == account_id and row["meeting_id"] == meeting_id and row["after_json"] == after_json:
+            return row["id"]
+    return None
 
 
 def ingest_files_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
@@ -244,9 +325,7 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
     if database_path is None:
         return _step_result(state, "write_back_crm", {"crm_update_ids": []})
 
-    account_name = (state.get("customer_profile_structured") or {}).get("account_name") or _infer_account_name(
-        state.get("customer_profile_raw", "")
-    )
+    account_name = _resolve_account_name(state, database_path=database_path)
     account_id = state.get("account_id")
     if account_id:
         account = get_account_by_id(database_path, account_id)
@@ -258,22 +337,39 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
     meeting_summary = state.get("meeting_summary", {})
     meeting_id = state.get("meeting_id")
     if not meeting_id:
-        meeting_id = save_meeting_record(
-            database_path,
-            {
-                "account_id": account_id,
-                "meeting_title": meeting_summary.get("account_name") or f"{account_name} meeting",
-                "meeting_note_raw": state.get("meeting_note_raw", ""),
-                "meeting_summary_json": json.dumps(meeting_summary, ensure_ascii=False),
-                "lead_score": state.get("lead_score", 0),
-                "priority": state.get("lead_priority", "medium"),
-            },
-        )
+        meeting_note_raw = state.get("meeting_note_raw", "")
+        existing_meeting_id = _find_existing_meeting(database_path, account_id=account_id, meeting_note_raw=meeting_note_raw)
+        if existing_meeting_id is not None:
+            meeting_id = existing_meeting_id
+        else:
+            meeting_id = save_meeting_record(
+                database_path,
+                {
+                    "account_id": account_id,
+                    "meeting_title": meeting_summary.get("account_name") or f"{account_name} meeting",
+                    "meeting_note_raw": meeting_note_raw,
+                    "meeting_summary_json": json.dumps(meeting_summary, ensure_ascii=False),
+                    "lead_score": state.get("lead_score", 0),
+                    "priority": state.get("lead_priority", "medium"),
+                },
+            )
 
     task_payload = state.get("task_payload", [])
     task_ids: list[int] = []
     for task in task_payload:
         if not isinstance(task, dict):
+            continue
+        title = str(task.get("title", "Follow up"))
+        due_at = str(task.get("due_at", date.today().isoformat()))
+        existing_task_id = _find_existing_task(
+            database_path,
+            account_id=account_id,
+            meeting_id=meeting_id,
+            title=title,
+            due_at=due_at,
+        )
+        if existing_task_id is not None:
+            task_ids.append(existing_task_id)
             continue
         task_ids.append(
             save_task_record(
@@ -281,25 +377,36 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
                 {
                     "account_id": account_id,
                     "meeting_id": meeting_id,
-                    "title": task.get("title", "Follow up"),
-                    "description": task.get("description", task.get("title", "Follow up")),
+                    "title": title,
+                    "description": task.get("description", title),
                     "priority": task.get("priority", state.get("lead_priority", "medium")),
-                    "due_at": task.get("due_at", date.today().isoformat()),
+                    "due_at": due_at,
                     "status": task.get("status", "open"),
                 },
             )
         )
 
-    crm_update_id = update_crm_account(
+    crm_after = {
+        "meeting_id": meeting_id,
+        "status": "active",
+        "opportunity_stage": state.get("opportunity_stage", "discovery"),
+        "last_contact_at": date.today().isoformat(),
+    }
+    crm_after_json = json.dumps(crm_after, ensure_ascii=False)
+    existing_crm_update_id = _find_existing_crm_update(
         database_path,
-        account_id,
-        {
-            "meeting_id": meeting_id,
-            "status": "active",
-            "opportunity_stage": state.get("opportunity_stage", "discovery"),
-            "last_contact_at": date.today().isoformat(),
-        },
+        account_id=account_id,
+        meeting_id=meeting_id,
+        after_json=crm_after_json,
     )
+    if existing_crm_update_id is not None:
+        crm_update_id = existing_crm_update_id
+    else:
+        crm_update_id = update_crm_account(
+            database_path,
+            account_id,
+            crm_after,
+        )
 
     memory_payload = {
         "confirmed_needs_json": json.dumps(_normalize_list(meeting_summary.get("confirmed_needs")), ensure_ascii=False),
@@ -326,9 +433,7 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
 
 def generate_dashboard_output_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
     del llm_client, database_path
-    account_name = (state.get("customer_profile_structured") or {}).get("account_name") or _infer_account_name(
-        state.get("customer_profile_raw", "")
-    )
+    account_name = _resolve_account_name(state)
     follow_up_plan = state.get("follow_up_plan", {})
     dashboard_messages = build_dashboard_summary_messages(
         meeting_parse_json=json.dumps(state.get("meeting_summary", {}), ensure_ascii=False),

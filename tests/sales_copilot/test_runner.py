@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from sales_copilot.storage import list_accounts, list_crm_updates, list_meeting_records, list_tasks
 from sales_copilot.runner import run_sales_copilot
 
 
@@ -72,3 +73,64 @@ def test_run_sales_copilot_handles_missing_facts_without_crm_write_back(tmp_path
 
     assert result["follow_up_plan"]["summary"]
     assert result["crm_update_ids"] == []
+
+
+def test_run_sales_copilot_uses_meeting_account_name_when_profile_is_generic(tmp_path: Path):
+    class MeetingNameLLM(FakeLLM):
+        def complete(self, messages, response_format=None):
+            self.calls.append(messages)
+            prompt_text = "\n".join(message["content"] for message in messages)
+            if "Parse the meeting notes" in prompt_text:
+                return (
+                    '{"account_name": "Acme Robotics", "customer_roles": ["CTO"], '
+                    '"confirmed_needs": ["private deployment"], "objections": [], '
+                    '"next_steps": ["send proposal"], "budget_signals": ["budget approved"], '
+                    '"timeline_signals": ["this quarter"], "competitors": []}'
+                )
+            if "Evaluate the lead" in prompt_text:
+                return (
+                    '{"lead_score": 88, "lead_priority": "high", "opportunity_stage": "proposal", '
+                    '"risk_flags": [], "reasons": ["strong fit"], "evidence": ["confirmed need"]}'
+                )
+            if "follow-up plan" in prompt_text.lower():
+                return (
+                    '{"summary": "Send proposal", "tasks": [{"title": "Send proposal", '
+                    '"description": "Send tailored proposal", "priority": "high", '
+                    '"due_at": "2026-04-03"}]}'
+                )
+            raise AssertionError(f"Unexpected prompt: {prompt_text}")
+
+    result = run_sales_copilot(
+        customer_profile_text="Enterprise customer profile.",
+        meeting_note_text="CTO requested a proposal for private deployment.",
+        database_path=tmp_path / "sales.db",
+        llm_client=MeetingNameLLM(),
+    )
+
+    accounts = list_accounts(tmp_path / "sales.db")
+
+    assert result["dashboard_output"]["account_name"] == "Acme Robotics"
+    assert accounts[0]["name"] == "Acme Robotics"
+
+
+def test_run_sales_copilot_repeated_input_does_not_duplicate_persisted_rows(tmp_path: Path):
+    db_path = tmp_path / "sales.db"
+
+    first = run_sales_copilot(
+        customer_profile_text="Acme Robotics is a manufacturing company.",
+        meeting_note_text="CTO requested a proposal for private deployment.",
+        database_path=db_path,
+        llm_client=FakeLLM(),
+    )
+    second = run_sales_copilot(
+        customer_profile_text="Acme Robotics is a manufacturing company.",
+        meeting_note_text="CTO requested a proposal for private deployment.",
+        database_path=db_path,
+        llm_client=FakeLLM(),
+    )
+
+    assert first["dashboard_output"]["account_name"] == second["dashboard_output"]["account_name"]
+    assert len(list_accounts(db_path)) == 1
+    assert len(list_meeting_records(db_path)) == 1
+    assert len(list_tasks(db_path)) == 1
+    assert len(list_crm_updates(db_path)) == 1

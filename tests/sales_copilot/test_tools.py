@@ -169,6 +169,71 @@ def test_search_account_history_and_open_tasks(tmp_path: Path):
     assert open_tasks[0]["title"] == "Send security checklist"
 
 
+def test_get_open_tasks_keeps_same_title_for_different_meetings(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    account_id = save_account(
+        db_path,
+        {
+            "name": "Acme Robotics",
+            "industry": "Manufacturing",
+            "size_segment": "Mid-Market",
+            "status": "active",
+            "opportunity_stage": "discovery",
+        },
+    )
+    first_meeting_id = save_meeting_record(
+        db_path,
+        {
+            "account_id": account_id,
+            "meeting_title": "Discovery Call",
+            "meeting_note_raw": "CTO asked for private deployment and SSO.",
+            "meeting_summary_json": '{"confirmed_needs": ["private deployment"]}',
+            "lead_score": 90,
+            "priority": "high",
+        },
+    )
+    second_meeting_id = save_meeting_record(
+        db_path,
+        {
+            "account_id": account_id,
+            "meeting_title": "Procurement Review",
+            "meeting_note_raw": "CFO asked about pricing and timing.",
+            "meeting_summary_json": '{"confirmed_needs": ["pricing"]}',
+            "lead_score": 82,
+            "priority": "high",
+        },
+    )
+    save_task_record(
+        db_path,
+        {
+            "account_id": account_id,
+            "meeting_id": first_meeting_id,
+            "title": "Send proposal",
+            "description": "Send first proposal",
+            "priority": "high",
+            "due_at": "2026-04-03",
+            "status": "open",
+        },
+    )
+    save_task_record(
+        db_path,
+        {
+            "account_id": account_id,
+            "meeting_id": second_meeting_id,
+            "title": "Send proposal",
+            "description": "Send updated proposal",
+            "priority": "high",
+            "due_at": "2026-04-03",
+            "status": "open",
+        },
+    )
+
+    open_tasks = get_open_tasks(db_path, account_id)
+
+    assert len(open_tasks) == 2
+    assert {task["meeting_id"] for task in open_tasks} == {first_meeting_id, second_meeting_id}
+
+
 def test_get_open_tasks_returns_empty_list_for_missing_account(tmp_path: Path):
     db_path = tmp_path / "sales_copilot.db"
     init_storage(db_path)

@@ -152,16 +152,8 @@ def get_open_tasks(db_path, account_id: int) -> list[dict]:
         return []
 
     tasks = [row for row in storage.list_tasks(db_path) if row["account_id"] == account_id and row["status"] == "open"]
-    ordered_tasks = sorted(tasks, key=lambda row: (row["due_at"], row["id"]))
-    deduped_tasks: list[dict] = []
-    seen_keys: set[tuple[str, str]] = set()
-    for task in ordered_tasks:
-        key = (task["title"], task["due_at"])
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        deduped_tasks.append(task)
-    return deduped_tasks
+    # 这里直接返回数据库里的开放待办，保留不同 meeting 生成的合法任务。
+    return sorted(tasks, key=lambda row: (row["due_at"], row["id"]))
 
 
 def _normalize_crm_after_payload(after: dict, *, meeting_id: int, before: dict) -> dict:

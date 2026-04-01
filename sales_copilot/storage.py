@@ -164,18 +164,19 @@ def list_meeting_records(db_path) -> list[dict]:
 def save_task_record(db_path, record: dict) -> int:
     init_storage(db_path)
     with _connect(db_path) as conn:
-        # 同一个账号的开放待办如果标题和到期日都一样，通常就是同一件事，先复用旧记录。
+        # 只把同一次 meeting 里完全相同的开放待办当成同一条，避免把不同 meeting 的任务误合并。
         if str(record.get("status", "")).strip() == "open":
             existing = conn.execute(
                 """
                 SELECT id
                 FROM tasks
-                WHERE account_id = ? AND title = ? AND due_at = ? AND status = 'open'
+                WHERE account_id = ? AND meeting_id = ? AND title = ? AND due_at = ? AND status = 'open'
                 ORDER BY id ASC
                 LIMIT 1
                 """,
                 (
                     record["account_id"],
+                    record["meeting_id"],
                     record["title"],
                     record["due_at"],
                 ),

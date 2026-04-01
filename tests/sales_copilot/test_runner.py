@@ -2,6 +2,7 @@ from pathlib import Path
 
 from sales_copilot.storage import get_account_memory, list_accounts, list_crm_updates, list_meeting_records, list_tasks
 from sales_copilot.runner import run_sales_copilot
+from sales_copilot.tools import get_open_tasks
 
 
 class FakeLLM:
@@ -136,7 +137,7 @@ def test_run_sales_copilot_repeated_input_does_not_duplicate_persisted_rows(tmp_
     assert len(list_crm_updates(db_path)) == 1
 
 
-def test_run_sales_copilot_reuses_open_tasks_for_repeated_account(tmp_path: Path):
+def test_run_sales_copilot_reuses_prior_history_and_open_tasks_for_repeated_account(tmp_path: Path):
     db_path = tmp_path / "sales.db"
 
     class RepeatedAccountLLM:
@@ -191,7 +192,70 @@ def test_run_sales_copilot_reuses_open_tasks_for_repeated_account(tmp_path: Path
 
     assert first["account_id"] == second["account_id"]
     assert second["open_tasks"]
+    assert any(row["meeting_note_raw"] == "CTO requested a proposal for private deployment." for row in second["retrieved_docs"])
+    assert any(task["title"] == "Send proposal" for task in second["open_tasks"])
     memory_row = get_account_memory(db_path, first["account_id"])
     assert "private deployment" in memory_row["confirmed_needs_json"]
     assert "pricing and procurement" in memory_row["confirmed_needs_json"]
-    assert len(list_tasks(db_path)) == 1
+    assert len(list_tasks(db_path)) == 2
+
+
+def test_run_sales_copilot_keeps_same_task_title_for_different_meetings(tmp_path: Path):
+    db_path = tmp_path / "sales.db"
+
+    class RepeatedAccountLLM:
+        def __init__(self) -> None:
+            self.calls: list[list[dict]] = []
+
+        def complete(self, messages, response_format=None):
+            self.calls.append(messages)
+            prompt_text = "\n".join(message["content"] for message in messages)
+            if "Parse the meeting notes" in prompt_text:
+                if "CTO requested a proposal for private deployment." in prompt_text:
+                    return (
+                        '{"account_name": "Acme Robotics", "customer_roles": ["CTO"], '
+                        '"confirmed_needs": ["private deployment"], "objections": [], '
+                        '"next_steps": ["send proposal"], "budget_signals": ["budget approved"], '
+                        '"timeline_signals": ["this quarter"], "competitors": []}'
+                    )
+                return (
+                    '{"account_name": "Acme Robotics", "customer_roles": ["CFO"], '
+                    '"confirmed_needs": ["pricing and procurement"], "objections": [], '
+                    '"next_steps": ["review pricing"], "budget_signals": ["budget approved"], '
+                    '"timeline_signals": ["next quarter"], "competitors": []}'
+                )
+            if "Evaluate the lead" in prompt_text:
+                return (
+                    '{"lead_score": 88, "lead_priority": "high", "opportunity_stage": "proposal", '
+                    '"risk_flags": [], "reasons": ["strong fit"], "evidence": ["confirmed need"]}'
+                )
+            if "follow-up plan" in prompt_text.lower():
+                return (
+                    '{"summary": "Send proposal", "tasks": [{"title": "Send proposal", '
+                    '"description": "Send tailored proposal", "priority": "high", '
+                    '"due_at": "2026-04-03"}]}'
+                )
+            raise AssertionError(f"Unexpected prompt: {prompt_text}")
+
+    llm = RepeatedAccountLLM()
+
+    first = run_sales_copilot(
+        customer_profile_text="Acme Robotics is a manufacturing company.",
+        meeting_note_text="CTO requested a proposal for private deployment.",
+        database_path=db_path,
+        llm_client=llm,
+    )
+    second = run_sales_copilot(
+        customer_profile_text="Acme Robotics is a manufacturing company.",
+        meeting_note_text="CFO asked about deployment pricing and procurement timing.",
+        database_path=db_path,
+        llm_client=llm,
+        account_id=first["account_id"],
+    )
+
+    assert first["account_id"] == second["account_id"]
+    assert len(list_tasks(db_path)) == 2
+    assert len(get_open_tasks(db_path, first["account_id"])) == 2
+    assert second["open_tasks"]
+    assert any(task["title"] == "Send proposal" for task in second["open_tasks"])
+    assert any("CTO requested a proposal for private deployment." == row["meeting_note_raw"] for row in second["retrieved_docs"])

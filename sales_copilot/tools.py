@@ -95,7 +95,7 @@ def _row_tokens(row: dict) -> set[str]:
 
 
 def tokenize(text: str) -> list[str]:
-    # 用最朴素的词元化就够了，避免引入更重的文本归一化。
+    # 只做最基础的词元化，避免把 public API 绑死在复杂归一化上。
     return re.findall(r"[a-z0-9]+", text.lower())
 
 
@@ -147,8 +147,25 @@ def search_account_history(db_path, account_id: int) -> list[dict]:
 
 
 def get_open_tasks(db_path, account_id: int) -> list[dict]:
+    account = storage.get_account_by_id(db_path, account_id)
+    if account is None:
+        raise ValueError(f"Account {account_id} does not exist")
+
     tasks = [row for row in storage.list_tasks(db_path) if row["account_id"] == account_id and row["status"] == "open"]
     return sorted(tasks, key=lambda row: (row["due_at"], row["id"]))
+
+
+def _normalize_crm_after_payload(after: dict, *, meeting_id: int, before: dict) -> dict:
+    normalized = {
+        "meeting_id": meeting_id,
+        "status": after.get("status", before["status"]),
+        "opportunity_stage": after.get("opportunity_stage", before["opportunity_stage"]),
+        "last_contact_at": after.get("last_contact_at", before.get("last_contact_at", "")),
+    }
+    for key, value in after.items():
+        if key not in normalized:
+            normalized[key] = value
+    return normalized
 
 
 def update_crm_account(db_path, account_id: int, after: dict) -> int:
@@ -160,25 +177,53 @@ def update_crm_account(db_path, account_id: int, after: dict) -> int:
     if meeting_id is None:
         raise ValueError("after must include meeting_id")
 
-    status = after.get("status", before["status"])
-    opportunity_stage = after.get("opportunity_stage", before["opportunity_stage"])
-    last_contact_at = after.get("last_contact_at", before.get("last_contact_at", ""))
+    normalized_after = _normalize_crm_after_payload(after, meeting_id=meeting_id, before=before)
 
-    storage.update_account_stage_and_status(
-        db_path,
-        account_id=account_id,
-        status=status,
-        opportunity_stage=opportunity_stage,
-        last_contact_at=last_contact_at,
-    )
-    payload = {
-        "account_id": account_id,
-        "meeting_id": meeting_id,
-        "update_type": "account_state",
-        "before_json": json.dumps(before, ensure_ascii=False),
-        "after_json": json.dumps(after, ensure_ascii=False),
-    }
-    return storage.save_crm_update(db_path, payload)
+    with storage._connect(db_path) as conn:
+        conn.row_factory = storage.sqlite3.Row
+        meeting_row = conn.execute(
+            "SELECT id, account_id FROM meeting_records WHERE id = ?",
+            (meeting_id,),
+        ).fetchone()
+        if meeting_row is None:
+            raise ValueError(f"Meeting {meeting_id} does not exist")
+        if meeting_row["account_id"] != account_id:
+            raise ValueError(f"Meeting {meeting_id} does not belong to account {account_id}")
+
+        conn.execute(
+            """
+            UPDATE accounts
+            SET status = ?, opportunity_stage = ?, last_contact_at = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                normalized_after["status"],
+                normalized_after["opportunity_stage"],
+                normalized_after["last_contact_at"],
+                account_id,
+            ),
+        )
+        payload = {
+            "account_id": account_id,
+            "meeting_id": meeting_id,
+            "update_type": "account_state",
+            "before_json": json.dumps(before, ensure_ascii=False),
+            "after_json": json.dumps(normalized_after, ensure_ascii=False),
+        }
+        cursor = conn.execute(
+            """
+            INSERT INTO crm_updates (account_id, meeting_id, update_type, before_json, after_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                payload["account_id"],
+                payload["meeting_id"],
+                payload["update_type"],
+                payload["before_json"],
+                payload["after_json"],
+            ),
+        )
+        return cursor.lastrowid
 
 
 def _merge_json_field(existing: dict, incoming: dict, field: str) -> str:
@@ -234,6 +279,7 @@ def seed_knowledge_chunks(db_path, rows: list[dict]) -> None:
                 "retrieval_metadata_json": json.dumps(row.get("retrieval_metadata", {}), ensure_ascii=False),
             },
         )
+        existing.add(key)
 
 
 def sample_product_chunks() -> list[dict]:

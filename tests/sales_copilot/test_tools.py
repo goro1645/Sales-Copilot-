@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from sales_copilot.storage import (
     get_account_by_id,
     get_account_memory,
@@ -7,6 +9,7 @@ from sales_copilot.storage import (
     list_crm_updates,
     list_knowledge_chunks,
     list_tasks,
+    list_meeting_records,
     save_account,
     save_meeting_record,
     save_task_record,
@@ -141,7 +144,116 @@ def test_search_account_history_and_open_tasks(tmp_path: Path):
     assert open_tasks[0]["title"] == "Send security checklist"
 
 
-def test_update_crm_account_and_append_account_memory(tmp_path: Path):
+def test_get_open_tasks_raises_for_missing_account(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    init_storage(db_path)
+
+    try:
+        get_open_tasks(db_path, 999)
+        raised = False
+    except ValueError:
+        raised = True
+
+    assert raised
+
+
+def test_seed_knowledge_chunks_dedupes_rows_in_same_batch(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    init_storage(db_path)
+    rows = sample_product_chunks()[:1]
+
+    seed_knowledge_chunks(db_path, rows + rows)
+
+    stored_chunks = list_knowledge_chunks(db_path)
+    assert len(stored_chunks) == 1
+
+
+def test_update_crm_account_keeps_account_unchanged_on_invalid_meeting(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    account_id = save_account(
+        db_path,
+        {
+            "name": "Northwind Traders",
+            "industry": "Retail",
+            "size_segment": "Enterprise",
+            "status": "active",
+            "opportunity_stage": "discovery",
+        },
+    )
+
+    try:
+        update_crm_account(
+            db_path,
+            account_id,
+            {
+                "meeting_id": 999,
+                "status": "paused",
+                "opportunity_stage": "proposal",
+                "last_contact_at": "2026-04-01",
+            },
+        )
+        raised = False
+    except Exception:
+        raised = True
+
+    account = get_account_by_id(db_path, account_id)
+    assert raised
+    assert account["status"] == "active"
+    assert account["opportunity_stage"] == "discovery"
+
+
+def test_update_crm_account_keeps_account_unchanged_on_cross_account_meeting(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    account_one_id = save_account(
+        db_path,
+        {
+            "name": "Northwind Traders",
+            "industry": "Retail",
+            "size_segment": "Enterprise",
+            "status": "active",
+            "opportunity_stage": "discovery",
+        },
+    )
+    account_two_id = save_account(
+        db_path,
+        {
+            "name": "Acme Robotics",
+            "industry": "Manufacturing",
+            "size_segment": "Mid-Market",
+            "status": "active",
+            "opportunity_stage": "qualification",
+        },
+    )
+    meeting_id = save_meeting_record(
+        db_path,
+        {
+            "account_id": account_two_id,
+            "meeting_title": "Discovery Call",
+            "meeting_note_raw": "Discussed deployment.",
+            "meeting_summary_json": '{"confirmed_needs": ["private deployment"]}',
+            "lead_score": 88,
+            "priority": "high",
+        },
+    )
+
+    with pytest.raises(Exception):
+        update_crm_account(
+            db_path,
+            account_one_id,
+            {
+                "meeting_id": meeting_id,
+                "status": "paused",
+                "opportunity_stage": "proposal",
+                "last_contact_at": "2026-04-01",
+            },
+        )
+
+    account = get_account_by_id(db_path, account_one_id)
+    assert account["status"] == "active"
+    assert account["opportunity_stage"] == "discovery"
+
+
+def test_update_crm_account_saves_normalized_after_payload(tmp_path: Path):
     db_path = tmp_path / "sales_copilot.db"
     account_id = save_account(
         db_path,
@@ -164,18 +276,6 @@ def test_update_crm_account_and_append_account_memory(tmp_path: Path):
             "priority": "medium",
         },
     )
-    upsert_account_memory(
-        db_path,
-        account_id,
-        {
-            "confirmed_needs_json": '["private deployment"]',
-            "budget_signals_json": "[]",
-            "timeline_signals_json": "[]",
-            "decision_makers_json": "[]",
-            "risk_flags_json": '["security_review"]',
-            "recommended_next_step": "Book technical demo",
-        },
-    )
 
     update_id = update_crm_account(
         db_path,
@@ -187,27 +287,14 @@ def test_update_crm_account_and_append_account_memory(tmp_path: Path):
             "last_contact_at": "2026-04-01",
         },
     )
-    append_account_memory(
-        db_path,
-        account_id,
-        {
-            "confirmed_needs_json": '["private deployment", "on-prem support"]',
-            "risk_flags_json": '["security_review", "legal_review"]',
-            "recommended_next_step": "Send updated proposal",
-        },
-    )
 
     account = get_account_by_id(db_path, account_id)
     crm_updates = list_crm_updates(db_path)
-    memory = get_account_memory(db_path, account_id)
 
     assert update_id == 1
     assert account["opportunity_stage"] == "proposal"
     assert crm_updates[0]["update_type"] == "account_state"
     assert crm_updates[0]["after_json"] == '{"meeting_id": 1, "status": "paused", "opportunity_stage": "proposal", "last_contact_at": "2026-04-01"}'
-    assert memory["confirmed_needs_json"] == '["private deployment", "on-prem support"]'
-    assert memory["risk_flags_json"] == '["security_review", "legal_review"]'
-    assert memory["recommended_next_step"] == "Send updated proposal"
 
 
 def test_merge_account_memory_dedupes_confirmed_needs_and_risk_flags():

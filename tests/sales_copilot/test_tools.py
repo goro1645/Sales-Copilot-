@@ -40,6 +40,7 @@ def test_ingest_text_file_reads_file_metadata_without_db():
     assert payload["filename"] == "sample_meeting_note.md"
     assert payload["source_path"] == str(SAMPLE_MEETING_FILE)
     assert "private deployment" in payload["text"].lower()
+    assert "blocks" not in payload
 
 
 def test_tokenize_normalizes_text():
@@ -66,6 +67,7 @@ def test_keyword_retrieve_ranks_rows_lexically():
 
     assert ranked[0]["id"] == 2
     assert ranked[0]["score"] > 0
+    assert keyword_retrieve("missing term", rows, top_k=3) == []
 
 
 def test_seed_helpers_and_search_wrappers(tmp_path: Path):
@@ -134,10 +136,8 @@ def test_search_account_history_and_open_tasks(tmp_path: Path):
     history = search_account_history(db_path, account_id)
     open_tasks = get_open_tasks(db_path, account_id)
 
-    assert history[0]["type"] == "account"
-    assert history[1]["type"] == "memory"
-    assert any(item["type"] == "meeting" for item in history)
-    assert any(item["type"] == "task" for item in history)
+    assert len(history) == 1
+    assert history[0]["meeting_title"] == "Discovery Call"
     assert open_tasks[0]["title"] == "Send security checklist"
 
 
@@ -204,6 +204,7 @@ def test_update_crm_account_and_append_account_memory(tmp_path: Path):
     assert update_id == 1
     assert account["opportunity_stage"] == "proposal"
     assert crm_updates[0]["update_type"] == "account_state"
+    assert crm_updates[0]["after_json"] == '{"meeting_id": 1, "status": "paused", "opportunity_stage": "proposal", "last_contact_at": "2026-04-01"}'
     assert memory["confirmed_needs_json"] == '["private deployment", "on-prem support"]'
     assert memory["risk_flags_json"] == '["security_review", "legal_review"]'
     assert memory["recommended_next_step"] == "Send updated proposal"

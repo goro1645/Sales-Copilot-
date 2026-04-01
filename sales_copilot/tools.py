@@ -62,12 +62,6 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
     return result
 
 
-def _block_text(text: str) -> list[str]:
-    # 按空行分块，够稳定，也方便后面拿去做检索或摘要。
-    blocks = [part.strip() for part in re.split(r"\n\s*\n+", text.strip()) if part.strip()]
-    return blocks or ([text.strip()] if text.strip() else [])
-
-
 def _seed_rows_from_file(filename: str) -> list[dict]:
     data = _load_json(_DATA_DIR / filename)
     rows = data if isinstance(data, list) else data.get("chunks", [])
@@ -112,7 +106,6 @@ def ingest_text_file(path) -> dict:
         "filename": file_path.name,
         "source_path": str(file_path),
         "text": text,
-        "blocks": _block_text(text),
     }
 
 
@@ -140,6 +133,7 @@ def keyword_retrieve(query: str, rows, top_k: int = 3) -> list[dict]:
     ranked.sort(key=lambda item: (-item["score"], item["_row_index"]))
     for item in ranked:
         item.pop("_row_index", None)
+    ranked = [item for item in ranked if item["score"] > 0]
     return ranked[: max(top_k, 0)]
 
 
@@ -148,19 +142,8 @@ def search_account_history(db_path, account_id: int) -> list[dict]:
     if account is None:
         raise ValueError(f"Account {account_id} does not exist")
 
-    memory = storage.get_account_memory(db_path, account_id)
     meetings = [row for row in storage.list_meeting_records(db_path) if row["account_id"] == account_id]
-    tasks = [row for row in storage.list_tasks(db_path) if row["account_id"] == account_id]
-    crm_updates = [row for row in storage.list_crm_updates(db_path) if row["account_id"] == account_id]
-
-    history: list[dict] = [
-        {"type": "account", "account_id": account_id, "account": account},
-        {"type": "memory", "account_id": account_id, "memory": memory},
-    ]
-    history.extend({"type": "meeting", **row} for row in meetings)
-    history.extend({"type": "task", **row} for row in tasks)
-    history.extend({"type": "crm_update", **row} for row in crm_updates)
-    return history
+    return meetings
 
 
 def get_open_tasks(db_path, account_id: int) -> list[dict]:
@@ -188,13 +171,12 @@ def update_crm_account(db_path, account_id: int, after: dict) -> int:
         opportunity_stage=opportunity_stage,
         last_contact_at=last_contact_at,
     )
-    updated = storage.get_account_by_id(db_path, account_id)
     payload = {
         "account_id": account_id,
         "meeting_id": meeting_id,
         "update_type": "account_state",
         "before_json": json.dumps(before, ensure_ascii=False),
-        "after_json": json.dumps(updated, ensure_ascii=False),
+        "after_json": json.dumps(after, ensure_ascii=False),
     }
     return storage.save_crm_update(db_path, payload)
 

@@ -1,27 +1,29 @@
-{
-  "source_type": "playbook",
-  "source_name": "Enterprise Sales Playbook",
-  "chunks": [
-    {
-      "chunk_text": "Start discovery by confirming the account's top two pain points, the current workflow, and who owns the decision.\n\nWrite the confirmed needs in short phrases so the account memory stays readable.",
-      "tags": ["discovery", "confirmed-needs", "decision-makers"],
-      "retrieval_metadata": {
-        "section": "discovery"
-      }
-    },
-    {
-      "chunk_text": "When a customer raises security review concerns, answer with deployment controls, SSO support, and audit evidence.\n\nThen offer a technical demo and a checklist for their security team.",
-      "tags": ["objection-handling", "security-review", "technical-demo"],
-      "retrieval_metadata": {
-        "section": "objections"
-      }
-    },
-    {
-      "chunk_text": "If the deal is moving forward, create a clear next step: send proposal, schedule demo, or book procurement review.\n\nOpen tasks should always point to one owner and one due date.",
-      "tags": ["next-step", "tasks", "proposal"],
-      "retrieval_metadata": {
-        "section": "next-steps"
-      }
+[
+  {
+    "source_type": "playbook",
+    "source_name": "Enterprise Sales Playbook",
+    "chunk_text": "Start discovery by confirming the account's top two pain points, the current workflow, and who owns the decision.\n\nWrite the confirmed needs in short phrases so the account memory stays readable.",
+    "tags": ["discovery", "confirmed-needs", "decision-makers"],
+    "retrieval_metadata": {
+      "section": "discovery"
     }
-  ]
-}
+  },
+  {
+    "source_type": "playbook",
+    "source_name": "Enterprise Sales Playbook",
+    "chunk_text": "When a customer raises security review concerns, answer with deployment controls, SSO support, and audit evidence.\n\nThen offer a technical demo and a checklist for their security team.",
+    "tags": ["objection-handling", "security-review", "technical-demo"],
+    "retrieval_metadata": {
+      "section": "objections"
+    }
+  },
+  {
+    "source_type": "playbook",
+    "source_name": "Enterprise Sales Playbook",
+    "chunk_text": "If the deal is moving forward, create a clear next step: send proposal, schedule demo, or book procurement review.\n\nOpen tasks should always point to one owner and one due date.",
+    "tags": ["next-step", "tasks", "proposal"],
+    "retrieval_metadata": {
+      "section": "next-steps"
+    }
+  }
+]

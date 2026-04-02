@@ -298,3 +298,42 @@ def test_run_sales_copilot_accepts_common_scoring_alias_fields(tmp_path: Path):
     assert result["lead_priority"] == "high"
     assert result["opportunity_stage"] == "proposal"
     assert result["risk_flags"] == ["security review"]
+
+
+def test_run_sales_copilot_accepts_nested_scoring_payloads_and_string_scores(tmp_path: Path):
+    class NestedScoringLLM(FakeLLM):
+        def complete(self, messages, response_format=None):
+            self.calls.append(messages)
+            prompt_text = "\n".join(message["content"] for message in messages)
+            if "Parse the meeting notes" in prompt_text:
+                return (
+                    '{"account_name": "BluePeak Health", "customer_roles": ["CIO"], '
+                    '"confirmed_needs": ["private deployment", "crm integration"], "objections": [], '
+                    '"next_steps": ["prepare workshop"], "budget_signals": ["pilot budget approved"], '
+                    '"timeline_signals": ["within 6 weeks"], "competitors": []}'
+                )
+            if "Evaluate the lead" in prompt_text:
+                return (
+                    '{"result": {"score": "84/100", "priority": "high", "stage": "proposal", '
+                    '"risks": ["security review"], "reasons": ["budget confirmed"], '
+                    '"evidence": ["pilot budget approved"]}}'
+                )
+            if "follow-up plan" in prompt_text.lower():
+                return (
+                    '{"summary": "Prepare the proposal workshop", "tasks": [{"title": "Prepare workshop", '
+                    '"description": "Align workshop materials", "priority": "high", '
+                    '"due_at": "2026-04-04"}]}'
+                )
+            raise AssertionError(f"Unexpected prompt: {prompt_text}")
+
+    result = run_sales_copilot(
+        customer_profile_text="BluePeak Health is evaluating a private deployment.",
+        meeting_note_text="The CIO asked for a proposal workshop and confirmed the pilot budget.",
+        database_path=tmp_path / "sales.db",
+        llm_client=NestedScoringLLM(),
+    )
+
+    assert result["lead_score"] == 84
+    assert result["lead_priority"] == "high"
+    assert result["opportunity_stage"] == "proposal"
+    assert result["risk_flags"] == ["security review"]

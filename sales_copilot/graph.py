@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from functools import partial
 from pathlib import Path
@@ -77,6 +78,12 @@ def _coerce_lead_score(raw_lead_score: Any) -> int | None:
     try:
         return int(raw_lead_score)
     except (TypeError, ValueError):
+        if isinstance(raw_lead_score, str):
+            # 真实模型有时会返回 "84/100"、"score: 84" 这类字符串。
+            # 这里提取第一个整数，尽量把稳定信号保留下来，而不是直接掉回 0 分。
+            match = re.search(r"-?\d+", raw_lead_score)
+            if match:
+                return int(match.group(0))
         return None
 
 
@@ -100,6 +107,25 @@ def _first_payload_value(payload: dict[str, Any], *keys: str) -> Any:
         if value is not None:
             return value
     return None
+
+
+def _unwrap_payload_object(payload: dict[str, Any]) -> dict[str, Any]:
+    # 一些模型会把真正结果再包一层，例如 {"result": {...}} 或 {"data": {...}}。
+    # 这里做有限展开，只取最常见的容器键，避免把任意嵌套都当成业务结果。
+    current = payload
+    for _ in range(3):
+        if any(key in current for key in ("lead_score", "score", "lead_priority", "priority", "opportunity_stage", "stage")):
+            return current
+        nested = None
+        for key in ("result", "data", "output", "final", "response"):
+            candidate = current.get(key)
+            if isinstance(candidate, dict):
+                nested = candidate
+                break
+        if nested is None:
+            return current
+        current = nested
+    return current
 
 
 def _looks_generic_account_name(value: str) -> bool:
@@ -271,7 +297,9 @@ def evaluate_lead_node(state: SalesCopilotState, *, llm_client, database_path=No
         retrieved_docs=state.get("retrieved_docs", []),
         account_memory=state.get("account_memory", {}),
     )
-    payload = _parse_json_object(llm_client.complete(messages, response_format={"type": "json_object"}))
+    payload = _unwrap_payload_object(
+        _parse_json_object(llm_client.complete(messages, response_format={"type": "json_object"}))
+    )
     lead_score = _coerce_lead_score(_first_payload_value(payload, "lead_score", "score"))
     lead_priority = str(
         _first_payload_value(payload, "lead_priority", "priority")

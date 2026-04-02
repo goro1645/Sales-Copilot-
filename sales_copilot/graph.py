@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import date, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable
@@ -126,6 +126,134 @@ def _unwrap_payload_object(payload: dict[str, Any]) -> dict[str, Any]:
             return current
         current = nested
     return current
+
+
+def _build_follow_up_task(
+    *,
+    title: str,
+    description: str,
+    priority: str,
+    due_in_days: int = 1,
+) -> dict[str, Any]:
+    # 统一补信息任务的结构，避免不同分支拼出来的字段不一致。
+    normalized_priority = priority if priority in {"low", "medium", "high"} else "medium"
+    return {
+        "title": title,
+        "description": description,
+        "priority": normalized_priority,
+        "due_at": (date.today() + timedelta(days=due_in_days)).isoformat(),
+        "status": "open",
+        "owner": "Sales",
+    }
+
+
+def _merge_task_payloads(*task_lists: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    # 同一轮工作流里，模型建议和补信息任务可能会同时产出。
+    # 这里按标题 + 截止日期去重，避免一轮运行里把同一待办重复落库。
+    merged: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for task_list in task_lists:
+        for task in task_list or []:
+            if not isinstance(task, dict):
+                continue
+            title = str(task.get("title", "Follow up")).strip() or "Follow up"
+            due_at = str(task.get("due_at", date.today().isoformat())).strip() or date.today().isoformat()
+            key = (title.lower(), due_at)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(
+                {
+                    "title": title,
+                    "description": str(task.get("description", title)).strip() or title,
+                    "priority": str(task.get("priority", "medium")).strip() or "medium",
+                    "due_at": due_at,
+                    "status": str(task.get("status", "open")).strip() or "open",
+                    "owner": str(task.get("owner", "Sales")).strip() or "Sales",
+                }
+            )
+    return merged
+
+
+def _build_missing_fact_follow_up(state: SalesCopilotState) -> dict[str, Any]:
+    # 这里把“信息不完整”翻译成销售可以执行的动作。
+    # 这样工作台不会只会说“缺信息”，而是能直接落成待办任务。
+    meeting_summary = state.get("meeting_summary") or {}
+    priority = str(state.get("lead_priority", "medium") or "medium")
+    missing_labels: list[str] = []
+    tasks: list[dict[str, Any]] = []
+
+    if not _normalize_list(meeting_summary.get("budget_signals")):
+        missing_labels.append("预算")
+        tasks.append(
+            _build_follow_up_task(
+                title="Confirm budget range",
+                description="Clarify the pilot budget range, approval owner, and commercial path.",
+                priority=priority,
+                due_in_days=1,
+            )
+        )
+    if not _normalize_list(meeting_summary.get("timeline_signals")):
+        missing_labels.append("时间线")
+        tasks.append(
+            _build_follow_up_task(
+                title="Confirm decision timeline",
+                description="Confirm the target decision date, pilot start window, and review milestones.",
+                priority=priority,
+                due_in_days=1,
+            )
+        )
+    if not _normalize_list(meeting_summary.get("customer_roles")):
+        missing_labels.append("决策人")
+        tasks.append(
+            _build_follow_up_task(
+                title="Identify decision makers",
+                description="Identify the technical approver, business sponsor, and procurement stakeholders.",
+                priority=priority,
+                due_in_days=2,
+            )
+        )
+    if not _normalize_list(meeting_summary.get("next_steps")):
+        missing_labels.append("下一步动作")
+        tasks.append(
+            _build_follow_up_task(
+                title="Schedule qualification follow-up",
+                description="Book a follow-up meeting to close the remaining qualification gaps.",
+                priority=priority,
+                due_in_days=2,
+            )
+        )
+
+    if not tasks:
+        tasks.append(
+            _build_follow_up_task(
+                title="Clarify qualification gaps",
+                description="Review the remaining qualification gaps and align the next customer touchpoint.",
+                priority=priority,
+                due_in_days=1,
+            )
+        )
+
+    summary = f"补齐{'、'.join(missing_labels)}等关键信息，并安排下一次跟进。" if missing_labels else "补齐剩余资格信息，并安排下一次跟进。"
+    return {"summary": summary, "tasks": tasks}
+
+
+def _augment_follow_up_payload_with_missing_facts(
+    state: SalesCopilotState,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    # missing_required_facts 现在是风险信号，而不是流程终止条件。
+    # 这里把风险补成明确任务，保证 CRM 和任务看板里能看到“接下来要补什么”。
+    risk_flags = set(_normalize_list(state.get("risk_flags")))
+    if "missing_required_facts" not in risk_flags:
+        payload["tasks"] = _merge_task_payloads(payload.get("tasks", []))
+        return payload
+
+    supplement = _build_missing_fact_follow_up(state)
+    payload["tasks"] = _merge_task_payloads(payload.get("tasks", []), supplement["tasks"])
+    existing_summary = str(payload.get("summary", "")).strip()
+    payload["summary"] = f"{existing_summary} 同时，{supplement['summary']}" if existing_summary else supplement["summary"]
+    return payload
 
 
 def _looks_generic_account_name(value: str) -> bool:
@@ -321,11 +449,12 @@ def evaluate_lead_node(state: SalesCopilotState, *, llm_client, database_path=No
 
 def need_more_info_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
     del llm_client, database_path
-    follow_up_plan = {
-        "summary": "补齐缺失的客户需求、预算、时间线和决策人信息。",
-        "tasks": [],
-    }
-    return _step_result(state, "need_more_info", {"follow_up_plan": follow_up_plan, "task_payload": []})
+    follow_up_plan = _build_missing_fact_follow_up(state)
+    return _step_result(
+        state,
+        "need_more_info",
+        {"follow_up_plan": follow_up_plan, "task_payload": list(follow_up_plan.get("tasks", []))},
+    )
 
 
 def low_priority_nurture_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
@@ -334,7 +463,12 @@ def low_priority_nurture_node(state: SalesCopilotState, *, llm_client=None, data
         "summary": "放入低优先级培育流程，先推送轻量教育内容。",
         "tasks": [],
     }
-    return _step_result(state, "low_priority_nurture", {"follow_up_plan": follow_up_plan, "task_payload": []})
+    follow_up_plan = _augment_follow_up_payload_with_missing_facts(state, follow_up_plan)
+    return _step_result(
+        state,
+        "low_priority_nurture",
+        {"follow_up_plan": follow_up_plan, "task_payload": list(follow_up_plan.get("tasks", []))},
+    )
 
 
 def _build_followup_payload(state: SalesCopilotState, *, llm_client) -> dict[str, Any]:
@@ -346,7 +480,7 @@ def _build_followup_payload(state: SalesCopilotState, *, llm_client) -> dict[str
     payload = _parse_json_object(llm_client.complete(messages, response_format={"type": "json_object"}))
     tasks = payload.get("tasks") or payload.get("task_payload") or []
     payload["tasks"] = tasks if isinstance(tasks, list) else []
-    return payload
+    return _augment_follow_up_payload_with_missing_facts(state, payload)
 
 
 def standard_follow_up_node(state: SalesCopilotState, *, llm_client, database_path=None) -> dict[str, Any]:
@@ -521,11 +655,11 @@ def generate_dashboard_output_node(state: SalesCopilotState, *, llm_client=None,
 
 def route_after_lead_evaluation(state: SalesCopilotState) -> str:
     meeting_summary = state.get("meeting_summary") or {}
-    risk_flags = state.get("risk_flags") or []
     lead_score = _coerce_lead_score(state.get("lead_score", 0))
 
-    # 缺失关键信息时先补信息，避免太早写 CRM 或直接进入跟进分支。
-    if not meeting_summary or lead_score is None or risk_flags == ["missing_required_facts"]:
+    # 只有在会议摘要不可用，或者模型没有给出可解析分数时，才退回补信息分支。
+    # 像 missing_required_facts 这样的标签现在只表示风险，不再直接掐断后续跟进。
+    if not meeting_summary or lead_score is None:
         return "need_more_info"
     if lead_score < 50:
         return "low_priority_nurture"
@@ -570,7 +704,7 @@ def build_sales_copilot_graph(*, llm_client, database_path) -> Any:
         },
     )
 
-    builder.add_edge("need_more_info", "generate_dashboard_output")
+    builder.add_edge("need_more_info", "write_back_crm")
     builder.add_edge("low_priority_nurture", "write_back_crm")
     builder.add_edge("standard_follow_up", "write_back_crm")
     builder.add_edge("high_priority_follow_up", "write_back_crm")

@@ -46,7 +46,7 @@ def test_run_sales_copilot_returns_dashboard_and_crm_ids(tmp_path: Path):
     assert result["crm_update_ids"]
 
 
-def test_run_sales_copilot_handles_missing_facts_without_crm_write_back(tmp_path: Path):
+def test_run_sales_copilot_turns_missing_facts_into_follow_up_tasks_and_crm_write_back(tmp_path: Path):
     class MissingFactsLLM(FakeLLM):
         def complete(self, messages, response_format=None):
             self.calls.append(messages)
@@ -73,7 +73,9 @@ def test_run_sales_copilot_handles_missing_facts_without_crm_write_back(tmp_path
     )
 
     assert result["follow_up_plan"]["summary"]
-    assert result["crm_update_ids"] == []
+    assert result["crm_update_ids"]
+    assert result["task_payload"]
+    assert any(task["title"] == "Confirm budget range" for task in result["task_payload"])
 
 
 def test_run_sales_copilot_uses_meeting_account_name_when_profile_is_generic(tmp_path: Path):

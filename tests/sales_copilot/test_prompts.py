@@ -52,6 +52,10 @@ def test_build_lead_scoring_messages_mentions_json_and_input_context():
     assert '"summary": "They want a pilot next month."' in messages[1]["content"]
     assert '"type": "doc"' in messages[1]["content"]
     assert '"prior_call": "Strong technical fit."' in messages[1]["content"]
+    assert "lead_score" in messages[1]["content"]
+    assert "lead_priority" in messages[1]["content"]
+    assert "opportunity_stage" in messages[1]["content"]
+    assert "risk_flags" in messages[1]["content"]
 
 
 def test_build_followup_plan_messages_mentions_no_hallucination():

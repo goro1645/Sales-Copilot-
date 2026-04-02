@@ -43,11 +43,22 @@ def build_lead_scoring_messages(
 ) -> list[dict[str, str]]:
     system_prompt = (
         "You are a sales copilot. Score leads from the provided evidence only. "
-        "Return valid JSON only. Do not invent missing details."
+        "Return valid JSON only. Do not invent missing details. "
+        "Return exactly one JSON object with these top-level fields: "
+        "lead_score, lead_priority, opportunity_stage, risk_flags, reasons, evidence. "
+        "Do not use alternate field names such as score, priority, stage, or risks."
     )
     user_prompt = (
-        "Evaluate the lead and produce JSON with a numeric score, short reasons, "
-        "and the evidence used.\n\n"
+        "Evaluate the lead and produce JSON using this schema:\n"
+        "{\n"
+        '  "lead_score": <integer 0-100>,\n'
+        '  "lead_priority": "low|medium|high",\n'
+        '  "opportunity_stage": "discovery|qualification|proposal|negotiation|closed_won|closed_lost",\n'
+        '  "risk_flags": ["..."],\n'
+        '  "reasons": ["..."],\n'
+        '  "evidence": ["..."]\n'
+        "}\n"
+        "If key information is missing, add missing_required_facts to risk_flags.\n\n"
         f"Customer profile:\n{customer_profile_text}\n\n"
         "Meeting summary:\n"
         f"{json.dumps(meeting_summary, ensure_ascii=False)}\n\n"

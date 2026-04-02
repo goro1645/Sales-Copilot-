@@ -259,3 +259,42 @@ def test_run_sales_copilot_keeps_same_task_title_for_different_meetings(tmp_path
     assert second["open_tasks"]
     assert any(task["title"] == "Send proposal" for task in second["open_tasks"])
     assert any("CTO requested a proposal for private deployment." == row["meeting_note_raw"] for row in second["retrieved_docs"])
+
+
+def test_run_sales_copilot_accepts_common_scoring_alias_fields(tmp_path: Path):
+    class AliasScoringLLM(FakeLLM):
+        def complete(self, messages, response_format=None):
+            self.calls.append(messages)
+            prompt_text = "\n".join(message["content"] for message in messages)
+            if "Parse the meeting notes" in prompt_text:
+                return (
+                    '{"account_name": "BluePeak Health", "customer_roles": ["CIO", "Compliance Manager"], '
+                    '"confirmed_needs": ["private deployment", "audit logging"], "objections": [], '
+                    '"next_steps": ["schedule workshop"], "budget_signals": ["pilot budget approved"], '
+                    '"timeline_signals": ["within 6 weeks"], "competitors": ["workflow automation vendor"]}'
+                )
+            if "Evaluate the lead" in prompt_text:
+                return (
+                    '{"score": 84, "priority": "high", "stage": "proposal", '
+                    '"risks": ["security review"], "reasons": ["budget and timeline confirmed"], '
+                    '"evidence": ["pilot budget approved", "within 6 weeks"]}'
+                )
+            if "follow-up plan" in prompt_text.lower():
+                return (
+                    '{"summary": "Prepare a compliance-focused workshop", "tasks": [{"title": "Prepare workshop", '
+                    '"description": "Draft the workshop agenda", "priority": "high", '
+                    '"due_at": "2026-04-04"}]}'
+                )
+            raise AssertionError(f"Unexpected prompt: {prompt_text}")
+
+    result = run_sales_copilot(
+        customer_profile_text="BluePeak Health is a healthcare group evaluating a sales copilot.",
+        meeting_note_text="CIO asked for private deployment, audit logging, and a workshop within 6 weeks.",
+        database_path=tmp_path / "sales.db",
+        llm_client=AliasScoringLLM(),
+    )
+
+    assert result["lead_score"] == 84
+    assert result["lead_priority"] == "high"
+    assert result["opportunity_stage"] == "proposal"
+    assert result["risk_flags"] == ["security review"]

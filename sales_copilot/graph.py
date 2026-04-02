@@ -92,6 +92,16 @@ def _normalize_list(value: Any) -> list[str]:
     return [text] if text else []
 
 
+def _first_payload_value(payload: dict[str, Any], *keys: str) -> Any:
+    # DeepSeek 偶尔会返回 score / priority / stage 这类别名。
+    # 这里统一做兼容映射，避免模型轻微偏离 schema 时整条链路直接掉回 0 分兜底。
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def _looks_generic_account_name(value: str) -> bool:
     text = value.strip().lower()
     if not text:
@@ -262,10 +272,13 @@ def evaluate_lead_node(state: SalesCopilotState, *, llm_client, database_path=No
         account_memory=state.get("account_memory", {}),
     )
     payload = _parse_json_object(llm_client.complete(messages, response_format={"type": "json_object"}))
-    lead_score = _coerce_lead_score(payload.get("lead_score"))
-    lead_priority = str(payload.get("lead_priority") or ("high" if lead_score and lead_score >= 80 else "medium"))
-    opportunity_stage = str(payload.get("opportunity_stage") or "discovery")
-    risk_flags = _normalize_list(payload.get("risk_flags"))
+    lead_score = _coerce_lead_score(_first_payload_value(payload, "lead_score", "score"))
+    lead_priority = str(
+        _first_payload_value(payload, "lead_priority", "priority")
+        or ("high" if lead_score and lead_score >= 80 else "medium")
+    )
+    opportunity_stage = str(_first_payload_value(payload, "opportunity_stage", "stage") or "discovery")
+    risk_flags = _normalize_list(_first_payload_value(payload, "risk_flags", "risks", "risk_labels"))
     return _step_result(
         state,
         "evaluate_lead",

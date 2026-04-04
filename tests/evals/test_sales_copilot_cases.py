@@ -67,7 +67,7 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
     assert by_case_id["high_intent_complete"]["expected_workflow"]["should_generate_tasks"] is True
     assert by_case_id["high_intent_complete"]["expected_workflow"]["required_task_titles"] == [
         "发送正式报价单",
-        "安排试点评审",
+        "安排试点评审会",
     ]
     assert by_case_id["high_intent_complete"]["expected_workflow"]["required_risk_flags"] == []
 
@@ -83,6 +83,7 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
         "确认预算范围",
         "梳理决策链",
     ]
+    assert "梳理决策链" in by_case_id["high_intent_missing_facts"]["expected_parse"]["next_steps"]
     assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["required_risk_flags"] == [
         "missing_required_facts"
     ]
@@ -109,6 +110,10 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["should_generate_tasks"] is False
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["required_task_titles"] == []
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["required_risk_flags"] == []
+    for case in cases:
+        assert set(case["expected_workflow"]["required_task_titles"]).issubset(
+            set(case["expected_parse"]["next_steps"])
+        )
 
 
 def test_load_golden_cases_raises_when_opportunity_stage_is_invalid(tmp_path):
@@ -180,6 +185,30 @@ def test_load_golden_cases_raises_when_tasks_enabled_but_titles_missing(tmp_path
     )
 
     with pytest.raises(ValueError, match="should_generate_tasks"):
+        load_golden_cases(path)
+
+
+def test_load_golden_cases_raises_when_required_task_titles_are_not_next_steps_subset(tmp_path):
+    path = tmp_path / "bad_task_subset.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "bad_task_subset",
+                segment="medium_intent_nurture",
+                lead_score_range=[55, 69],
+                lead_priority="medium",
+                opportunity_stage="discovery",
+                expected_route="standard_follow_up",
+                should_write_crm=True,
+                should_generate_tasks=True,
+                required_task_titles=["额外追问"],
+                required_risk_flags=[],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="required_task_titles"):
         load_golden_cases(path)
 
 

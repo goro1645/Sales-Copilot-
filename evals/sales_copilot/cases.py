@@ -237,6 +237,16 @@ def _validate_segment_contract(
         )
 
 
+def _validate_task_title_subset(
+    *,
+    required_task_titles: list[str],
+    next_steps: list[str],
+    label: str,
+) -> None:
+    if not set(required_task_titles).issubset(set(next_steps)):
+        raise ValueError(f"{label} required_task_titles must be a subset of expected_parse.next_steps")
+
+
 def load_golden_cases(path: str | Path) -> list[GoldenCase]:
     cases: list[GoldenCase] = []
     seen_case_ids: set[str] = set()
@@ -370,6 +380,11 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 should_generate_tasks=expected_workflow["should_generate_tasks"],
                 required_task_titles=expected_workflow["required_task_titles"],
                 label=f"line {line_number} segment",
+            )
+            _validate_task_title_subset(
+                required_task_titles=expected_workflow["required_task_titles"],
+                next_steps=expected_parse["next_steps"],
+                label=f"line {line_number} expected_workflow",
             )
 
             cases.append(

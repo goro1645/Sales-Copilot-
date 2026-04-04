@@ -74,6 +74,14 @@ _ALLOWED_EXPECTED_ROUTES = {
     "standard_follow_up",
     "high_priority_follow_up",
 }
+_ALLOWED_OPPORTUNITY_STAGES = {
+    "discovery",
+    "qualification",
+    "proposal",
+    "negotiation",
+    "closed_won",
+    "closed_lost",
+}
 _ALLOWED_LEAD_PRIORITIES = {"low", "medium", "high"}
 _STABLE_RISK_FLAG_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -161,6 +169,13 @@ def _ensure_segment(value: object, label: str) -> str:
     if segment not in _ALLOWED_SEGMENTS:
         raise ValueError(f"{label} must be one of {sorted(_ALLOWED_SEGMENTS)}")
     return segment
+
+
+def _ensure_opportunity_stage(value: object, label: str) -> str:
+    stage = _ensure_string(value, label)
+    if stage not in _ALLOWED_OPPORTUNITY_STAGES:
+        raise ValueError(f"{label} must be one of {sorted(_ALLOWED_OPPORTUNITY_STAGES)}")
+    return stage
 
 
 def load_golden_cases(path: str | Path) -> list[GoldenCase]:
@@ -265,11 +280,22 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                     f"line {line_number} expected_workflow.required_task_titles must not be empty when "
                     "should_generate_tasks is true"
                 )
+            required_risk_flags = _ensure_stable_risk_flags(
+                expected_workflow_raw["required_risk_flags"],
+                f"line {line_number} expected_workflow.required_risk_flags",
+            )
+            if "missing_required_facts" in required_risk_flags and (
+                not should_generate_tasks or not required_task_titles
+            ):
+                raise ValueError(
+                    f"line {line_number} expected_workflow required_missing_required_facts_tasks must be enabled "
+                    "and have task titles"
+                )
 
             expected_workflow = {
                 "lead_score_range": lead_score_range,
                 "lead_priority": lead_priority,
-                "opportunity_stage": _ensure_string(
+                "opportunity_stage": _ensure_opportunity_stage(
                     expected_workflow_raw["opportunity_stage"],
                     f"line {line_number} expected_workflow.opportunity_stage",
                 ),
@@ -280,10 +306,7 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 ),
                 "should_generate_tasks": should_generate_tasks,
                 "required_task_titles": required_task_titles,
-                "required_risk_flags": _ensure_stable_risk_flags(
-                    expected_workflow_raw["required_risk_flags"],
-                    f"line {line_number} expected_workflow.required_risk_flags",
-                ),
+                "required_risk_flags": required_risk_flags,
             }
 
             cases.append(

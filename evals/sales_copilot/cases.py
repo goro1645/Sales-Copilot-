@@ -2,17 +2,28 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TypedDict
+from typing import TypedDict, cast
 
 
 class ExpectedParse(TypedDict):
-    intent: str
-    confidence: float
+    account_name: str
+    customer_roles: list[str]
+    confirmed_needs: list[str]
+    budget_signals: list[str]
+    timeline_signals: list[str]
+    next_steps: list[str]
+    competitors: list[str]
 
 
 class ExpectedWorkflow(TypedDict):
-    route: str
-    required_workflow_fields: list[str]
+    lead_score_range: list[int]
+    lead_priority: str
+    opportunity_stage: str
+    expected_route: str
+    should_write_crm: bool
+    should_generate_tasks: bool
+    required_task_titles: list[str]
+    required_risk_flags: list[str]
 
 
 class GoldenCase(TypedDict):
@@ -23,8 +34,25 @@ class GoldenCase(TypedDict):
 
 
 _TOP_LEVEL_FIELDS = ("case_id", "input_text", "expected_parse", "expected_workflow")
-_EXPECTED_PARSE_FIELDS = ("intent", "confidence")
-_EXPECTED_WORKFLOW_FIELDS = ("route", "required_workflow_fields")
+_EXPECTED_PARSE_FIELDS = (
+    "account_name",
+    "customer_roles",
+    "confirmed_needs",
+    "budget_signals",
+    "timeline_signals",
+    "next_steps",
+    "competitors",
+)
+_EXPECTED_WORKFLOW_FIELDS = (
+    "lead_score_range",
+    "lead_priority",
+    "opportunity_stage",
+    "expected_route",
+    "should_write_crm",
+    "should_generate_tasks",
+    "required_task_titles",
+    "required_risk_flags",
+)
 
 
 def _missing_fields(data: dict[str, object], required_fields: tuple[str, ...]) -> list[str]:
@@ -37,10 +65,15 @@ def _ensure_object(value: object, label: str) -> dict[str, object]:
     return value
 
 
-def _validate_fields(data: dict[str, object], required_fields: tuple[str, ...], label: str) -> None:
+def _validate_fields(
+    data: dict[str, object],
+    required_fields: tuple[str, ...],
+    label: str,
+    error_label: str,
+) -> None:
     missing_fields = _missing_fields(data, required_fields)
     if missing_fields:
-        raise ValueError(f"{label} missing required fields: {', '.join(missing_fields)}")
+        raise ValueError(f"{label} missing {error_label}: {', '.join(missing_fields)}")
 
 
 def load_golden_cases(path: str | Path) -> list[GoldenCase]:
@@ -55,10 +88,15 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
 
             record = json.loads(line)
             top_level = _ensure_object(record, f"line {line_number}")
-            _validate_fields(top_level, _TOP_LEVEL_FIELDS, f"line {line_number}")
+            _validate_fields(top_level, _TOP_LEVEL_FIELDS, f"line {line_number}", "required_top_level_fields")
 
             expected_parse = _ensure_object(top_level["expected_parse"], f"line {line_number} expected_parse")
-            _validate_fields(expected_parse, _EXPECTED_PARSE_FIELDS, f"line {line_number} expected_parse")
+            _validate_fields(
+                expected_parse,
+                _EXPECTED_PARSE_FIELDS,
+                f"line {line_number} expected_parse",
+                "required_parse_fields",
+            )
 
             expected_workflow = _ensure_object(
                 top_level["expected_workflow"],
@@ -68,9 +106,19 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 expected_workflow,
                 _EXPECTED_WORKFLOW_FIELDS,
                 f"line {line_number} expected_workflow",
+                "required_workflow_fields",
             )
 
-            # 这里把字典原样返回，方便评测代码直接按键读取。
-            cases.append(top_level)  # type: ignore[arg-type]
+            cases.append(
+                cast(
+                    GoldenCase,
+                    {
+                        "case_id": top_level["case_id"],
+                        "input_text": top_level["input_text"],
+                        "expected_parse": cast(ExpectedParse, expected_parse),
+                        "expected_workflow": cast(ExpectedWorkflow, expected_workflow),
+                    },
+                )
+            )
 
     return cases

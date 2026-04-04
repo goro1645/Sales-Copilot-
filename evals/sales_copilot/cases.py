@@ -62,6 +62,12 @@ _EXPECTED_WORKFLOW_FIELDS = (
     "required_task_titles",
     "required_risk_flags",
 )
+_ALLOWED_EXPECTED_ROUTES = {
+    "low_priority_nurture",
+    "standard_follow_up",
+    "high_priority_follow_up",
+}
+_ALLOWED_LEAD_PRIORITIES = {"low", "medium", "high"}
 
 
 def _missing_fields(data: dict[str, object], required_fields: tuple[str, ...]) -> list[str]:
@@ -85,8 +91,58 @@ def _validate_fields(
         raise ValueError(f"{label} missing {error_label}: {', '.join(missing_fields)}")
 
 
+def _ensure_string(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be a non-empty string")
+    return value
+
+
+def _ensure_bool(value: object, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{label} must be a boolean")
+    return value
+
+
+def _ensure_string_list(value: object, label: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be a list of strings")
+    result: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{label}[{index}] must be a non-empty string")
+        result.append(item)
+    return result
+
+
+def _ensure_lead_score_range(value: object, label: str) -> list[int]:
+    if not isinstance(value, list) or len(value) != 2:
+        raise ValueError(f"{label} must be a list of exactly 2 integers")
+    normalized: list[int] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, int) or isinstance(item, bool):
+            raise ValueError(f"{label}[{index}] must be an integer")
+        if item < 0 or item > 100:
+            raise ValueError(f"{label}[{index}] must be between 0 and 100")
+        normalized.append(item)
+    if normalized[0] > normalized[1]:
+        raise ValueError(f"{label} must be in ascending order")
+    if normalized[0] < 50 <= normalized[1] or normalized[0] < 80 <= normalized[1]:
+        raise ValueError(f"{label} cannot cross routing thresholds")
+    return normalized
+
+
+def _expected_route_for_score_range(score_range: list[int]) -> str:
+    upper_bound = score_range[1]
+    if upper_bound < 50:
+        return "low_priority_nurture"
+    if upper_bound < 80:
+        return "standard_follow_up"
+    return "high_priority_follow_up"
+
+
 def load_golden_cases(path: str | Path) -> list[GoldenCase]:
     cases: list[GoldenCase] = []
+    seen_case_ids: set[str] = set()
     file_path = Path(path)
 
     with file_path.open("r", encoding="utf-8") as handle:
@@ -104,6 +160,15 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 "required_top_level_fields",
             )
 
+            case_id = _ensure_string(top_level["case_id"], f"line {line_number} case_id")
+            if case_id in seen_case_ids:
+                raise ValueError(f"line {line_number} case_id must be unique: {case_id}")
+            seen_case_ids.add(case_id)
+
+            _ensure_string(top_level["segment"], f"line {line_number} segment")
+            _ensure_string(top_level["customer_profile_text"], f"line {line_number} customer_profile_text")
+            _ensure_string(top_level["meeting_note_text"], f"line {line_number} meeting_note_text")
+
             expected_parse = _ensure_object(top_level["expected_parse"], f"line {line_number} expected_parse")
             _validate_fields(
                 expected_parse,
@@ -111,6 +176,15 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 f"line {line_number} expected_parse",
                 "required_parse_fields",
             )
+            expected_parse = {
+                "account_name": _ensure_string(expected_parse["account_name"], f"line {line_number} expected_parse.account_name"),
+                "customer_roles": _ensure_string_list(expected_parse["customer_roles"], f"line {line_number} expected_parse.customer_roles"),
+                "confirmed_needs": _ensure_string_list(expected_parse["confirmed_needs"], f"line {line_number} expected_parse.confirmed_needs"),
+                "budget_signals": _ensure_string_list(expected_parse["budget_signals"], f"line {line_number} expected_parse.budget_signals"),
+                "timeline_signals": _ensure_string_list(expected_parse["timeline_signals"], f"line {line_number} expected_parse.timeline_signals"),
+                "next_steps": _ensure_string_list(expected_parse["next_steps"], f"line {line_number} expected_parse.next_steps"),
+                "competitors": _ensure_string_list(expected_parse["competitors"], f"line {line_number} expected_parse.competitors"),
+            }
 
             expected_workflow = _ensure_object(
                 top_level["expected_workflow"],
@@ -122,12 +196,65 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 f"line {line_number} expected_workflow",
                 "required_workflow_fields",
             )
+            lead_score_range = _ensure_lead_score_range(
+                expected_workflow["lead_score_range"],
+                f"line {line_number} expected_workflow.lead_score_range",
+            )
+            expected_route = _ensure_string(
+                expected_workflow["expected_route"],
+                f"line {line_number} expected_workflow.expected_route",
+            )
+            if expected_route not in _ALLOWED_EXPECTED_ROUTES:
+                raise ValueError(
+                    f"line {line_number} expected_workflow.expected_route must be one of "
+                    f"{sorted(_ALLOWED_EXPECTED_ROUTES)}"
+                )
+            if expected_route != _expected_route_for_score_range(lead_score_range):
+                raise ValueError(
+                    f"line {line_number} expected_workflow.expected_route must match lead_score_range"
+                )
+
+            lead_priority = _ensure_string(
+                expected_workflow["lead_priority"],
+                f"line {line_number} expected_workflow.lead_priority",
+            )
+            if lead_priority not in _ALLOWED_LEAD_PRIORITIES:
+                raise ValueError(
+                    f"line {line_number} expected_workflow.lead_priority must be one of "
+                    f"{sorted(_ALLOWED_LEAD_PRIORITIES)}"
+                )
+
+            expected_workflow = {
+                "lead_score_range": lead_score_range,
+                "lead_priority": lead_priority,
+                "opportunity_stage": _ensure_string(
+                    expected_workflow["opportunity_stage"],
+                    f"line {line_number} expected_workflow.opportunity_stage",
+                ),
+                "expected_route": expected_route,
+                "should_write_crm": _ensure_bool(
+                    expected_workflow["should_write_crm"],
+                    f"line {line_number} expected_workflow.should_write_crm",
+                ),
+                "should_generate_tasks": _ensure_bool(
+                    expected_workflow["should_generate_tasks"],
+                    f"line {line_number} expected_workflow.should_generate_tasks",
+                ),
+                "required_task_titles": _ensure_string_list(
+                    expected_workflow["required_task_titles"],
+                    f"line {line_number} expected_workflow.required_task_titles",
+                ),
+                "required_risk_flags": _ensure_string_list(
+                    expected_workflow["required_risk_flags"],
+                    f"line {line_number} expected_workflow.required_risk_flags",
+                ),
+            }
 
             cases.append(
                 cast(
                     GoldenCase,
                     {
-                        "case_id": top_level["case_id"],
+                        "case_id": case_id,
                         "segment": top_level["segment"],
                         "customer_profile_text": top_level["customer_profile_text"],
                         "meeting_note_text": top_level["meeting_note_text"],

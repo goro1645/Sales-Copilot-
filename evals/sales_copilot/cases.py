@@ -84,6 +84,32 @@ _ALLOWED_OPPORTUNITY_STAGES = {
 }
 _ALLOWED_LEAD_PRIORITIES = {"low", "medium", "high"}
 _STABLE_RISK_FLAG_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_SEGMENT_CONTRACTS = {
+    "high_intent_complete": {
+        "lead_priority": "high",
+        "expected_route": "high_priority_follow_up",
+        "score_min": 80,
+        "score_max": 100,
+    },
+    "high_intent_missing_facts": {
+        "lead_priority": "high",
+        "expected_route": "high_priority_follow_up",
+        "score_min": 80,
+        "score_max": 100,
+    },
+    "medium_intent_nurture": {
+        "lead_priority": "medium",
+        "expected_route": "standard_follow_up",
+        "score_min": 50,
+        "score_max": 79,
+    },
+    "low_intent_or_noise": {
+        "lead_priority": "low",
+        "expected_route": "low_priority_nurture",
+        "score_min": 0,
+        "score_max": 49,
+    },
+}
 
 
 def _missing_fields(data: dict[str, object], required_fields: tuple[str, ...]) -> list[str]:
@@ -176,6 +202,39 @@ def _ensure_opportunity_stage(value: object, label: str) -> str:
     if stage not in _ALLOWED_OPPORTUNITY_STAGES:
         raise ValueError(f"{label} must be one of {sorted(_ALLOWED_OPPORTUNITY_STAGES)}")
     return stage
+
+
+def _validate_segment_contract(
+    *,
+    segment: str,
+    lead_priority: str,
+    expected_route: str,
+    lead_score_range: list[int],
+    required_risk_flags: list[str],
+    should_generate_tasks: bool,
+    required_task_titles: list[str],
+    label: str,
+) -> None:
+    contract = _SEGMENT_CONTRACTS.get(segment)
+    if contract is None:
+        raise ValueError(f"{label} must be one of {sorted(_SEGMENT_CONTRACTS)}")
+
+    if lead_priority != contract["lead_priority"]:
+        raise ValueError(f"{label} lead_priority must be {contract['lead_priority']}")
+    if expected_route != contract["expected_route"]:
+        raise ValueError(f"{label} expected_route must be {contract['expected_route']}")
+    if lead_score_range[0] < contract["score_min"] or lead_score_range[1] > contract["score_max"]:
+        raise ValueError(
+            f"{label} lead_score_range must stay within {contract['score_min']}..{contract['score_max']}"
+        )
+    if segment == "high_intent_missing_facts" and "missing_required_facts" not in required_risk_flags:
+        raise ValueError(f"{label} missing_required_facts must be present for this segment")
+    if "missing_required_facts" in required_risk_flags and (
+        not should_generate_tasks or not required_task_titles
+    ):
+        raise ValueError(
+            f"{label} required_missing_required_facts_tasks must be enabled and have task titles"
+        )
 
 
 def load_golden_cases(path: str | Path) -> list[GoldenCase]:
@@ -284,13 +343,6 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 expected_workflow_raw["required_risk_flags"],
                 f"line {line_number} expected_workflow.required_risk_flags",
             )
-            if "missing_required_facts" in required_risk_flags and (
-                not should_generate_tasks or not required_task_titles
-            ):
-                raise ValueError(
-                    f"line {line_number} expected_workflow required_missing_required_facts_tasks must be enabled "
-                    "and have task titles"
-                )
 
             expected_workflow = {
                 "lead_score_range": lead_score_range,
@@ -308,6 +360,17 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 "required_task_titles": required_task_titles,
                 "required_risk_flags": required_risk_flags,
             }
+
+            _validate_segment_contract(
+                segment=segment,
+                lead_priority=expected_workflow["lead_priority"],
+                expected_route=expected_workflow["expected_route"],
+                lead_score_range=expected_workflow["lead_score_range"],
+                required_risk_flags=expected_workflow["required_risk_flags"],
+                should_generate_tasks=expected_workflow["should_generate_tasks"],
+                required_task_titles=expected_workflow["required_task_titles"],
+                label=f"line {line_number} segment",
+            )
 
             cases.append(
                 cast(

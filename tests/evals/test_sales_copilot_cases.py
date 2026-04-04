@@ -58,30 +58,56 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
         "medium_intent_nurture",
         "low_intent_or_noise",
     ]
+    assert by_case_id["high_intent_complete"]["expected_parse"]["account_name"] == "华东制造集团"
     assert by_case_id["high_intent_complete"]["segment"] == "high_intent_complete"
+    assert by_case_id["high_intent_complete"]["expected_workflow"]["lead_priority"] == "high"
     assert by_case_id["high_intent_complete"]["expected_workflow"]["opportunity_stage"] == "proposal"
     assert by_case_id["high_intent_complete"]["expected_workflow"]["lead_score_range"] == [90, 100]
     assert by_case_id["high_intent_complete"]["expected_workflow"]["should_write_crm"] is True
+    assert by_case_id["high_intent_complete"]["expected_workflow"]["should_generate_tasks"] is True
+    assert by_case_id["high_intent_complete"]["expected_workflow"]["required_task_titles"] == [
+        "发送正式报价单",
+        "安排试点评审",
+    ]
     assert by_case_id["high_intent_complete"]["expected_workflow"]["required_risk_flags"] == []
 
+    assert by_case_id["high_intent_missing_facts"]["expected_parse"]["account_name"] == "北区连锁零售"
     assert by_case_id["high_intent_missing_facts"]["segment"] == "high_intent_missing_facts"
+    assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["lead_priority"] == "high"
     assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["opportunity_stage"] == "qualification"
-    assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["lead_score_range"] == [70, 79]
+    assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["lead_score_range"] == [80, 89]
     assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["should_write_crm"] is True
+    assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["should_generate_tasks"] is True
+    assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["required_task_titles"] == [
+        "补齐联系人信息",
+        "确认预算范围",
+        "梳理决策链",
+    ]
     assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["required_risk_flags"] == [
         "missing_required_facts"
     ]
 
+    assert by_case_id["medium_intent_nurture"]["expected_parse"]["account_name"] == "南方科技服务公司"
     assert by_case_id["medium_intent_nurture"]["segment"] == "medium_intent_nurture"
+    assert by_case_id["medium_intent_nurture"]["expected_workflow"]["lead_priority"] == "medium"
     assert by_case_id["medium_intent_nurture"]["expected_workflow"]["opportunity_stage"] == "discovery"
     assert by_case_id["medium_intent_nurture"]["expected_workflow"]["lead_score_range"] == [55, 69]
     assert by_case_id["medium_intent_nurture"]["expected_workflow"]["should_write_crm"] is True
+    assert by_case_id["medium_intent_nurture"]["expected_workflow"]["should_generate_tasks"] is True
+    assert by_case_id["medium_intent_nurture"]["expected_workflow"]["required_task_titles"] == [
+        "发送案例资料",
+        "安排方案讲解",
+    ]
     assert by_case_id["medium_intent_nurture"]["expected_workflow"]["required_risk_flags"] == []
 
+    assert by_case_id["low_intent_or_noise"]["expected_parse"]["account_name"] == "未知"
     assert by_case_id["low_intent_or_noise"]["segment"] == "low_intent_or_noise"
+    assert by_case_id["low_intent_or_noise"]["expected_workflow"]["lead_priority"] == "low"
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["opportunity_stage"] == "discovery"
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["lead_score_range"] == [0, 24]
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["should_write_crm"] is True
+    assert by_case_id["low_intent_or_noise"]["expected_workflow"]["should_generate_tasks"] is False
+    assert by_case_id["low_intent_or_noise"]["expected_workflow"]["required_task_titles"] == []
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["required_risk_flags"] == []
 
 
@@ -116,10 +142,10 @@ def test_load_golden_cases_raises_when_missing_required_facts_requires_tasks(tmp
             _build_sales_case(
                 "bad_missing_facts",
                 segment="high_intent_missing_facts",
-                lead_score_range=[70, 79],
-                lead_priority="medium",
+                lead_score_range=[80, 89],
+                lead_priority="high",
                 opportunity_stage="qualification",
-                expected_route="standard_follow_up",
+                expected_route="high_priority_follow_up",
                 should_write_crm=True,
                 should_generate_tasks=False,
                 required_task_titles=[],
@@ -154,4 +180,28 @@ def test_load_golden_cases_raises_when_tasks_enabled_but_titles_missing(tmp_path
     )
 
     with pytest.raises(ValueError, match="should_generate_tasks"):
+        load_golden_cases(path)
+
+
+def test_load_golden_cases_raises_when_segment_contract_is_inconsistent(tmp_path):
+    path = tmp_path / "bad_segment_contract.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "bad_segment_contract",
+                segment="high_intent_missing_facts",
+                lead_score_range=[55, 69],
+                lead_priority="medium",
+                opportunity_stage="qualification",
+                expected_route="standard_follow_up",
+                should_write_crm=True,
+                should_generate_tasks=True,
+                required_task_titles=["补齐联系人信息"],
+                required_risk_flags=["missing_required_facts"],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="segment"):
         load_golden_cases(path)

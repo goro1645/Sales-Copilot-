@@ -1,0 +1,4 @@
+{"case_id":"high_intent_complete","input_text":"客户明确表示本周要确认报价并推进试点，已经有预算。","expected_parse":{"intent":"high","confidence":0.97},"expected_workflow":{"route":"complete","required_workflow_fields":["account_name","contact_name","next_step"]}}
+{"case_id":"high_intent_missing_facts","input_text":"客户很想推进，但还没拿到联系人和预算信息，需要补事实后再跟进。","expected_parse":{"intent":"high","confidence":0.91},"expected_workflow":{"route":"complete","required_workflow_fields":["account_name","contact_name","budget"]}}
+{"case_id":"medium_intent_nurture","input_text":"客户愿意先看方案和案例，后续再安排正式会议。","expected_parse":{"intent":"medium","confidence":0.74},"expected_workflow":{"route":"nurture","required_workflow_fields":["account_name","next_step"]}}
+{"case_id":"low_intent_or_noise","input_text":"谢谢，晚点再说。","expected_parse":{"intent":"low","confidence":0.33},"expected_workflow":{"route":"ignore","required_workflow_fields":["account_name"]}}

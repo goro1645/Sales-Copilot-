@@ -36,6 +36,35 @@ def test_evaluate_parse_case_scores_scalar_and_list_fields():
     assert metrics["risk_flag_recall"] == 1.0
 
 
+def test_evaluate_parse_case_treats_non_exact_account_name_as_mismatch():
+    case = {
+        "expected_parse": {
+            "account_name": "BluePeak Health",
+            "customer_roles": [],
+            "confirmed_needs": [],
+            "budget_signals": [],
+            "timeline_signals": [],
+            "next_steps": [],
+            "competitors": [],
+        },
+        "expected_workflow": {"required_risk_flags": []},
+    }
+    actual_parse = {
+        "account_name": " bluepeak health ",
+        "customer_roles": [],
+        "confirmed_needs": [],
+        "budget_signals": [],
+        "timeline_signals": [],
+        "next_steps": [],
+        "competitors": [],
+        "risk_flags": [],
+    }
+
+    metrics = evaluate_parse_case(case, actual_parse)
+
+    assert metrics["field_exact_match"]["account_name"] is False
+
+
 def test_evaluate_parse_case_marks_invalid_json_as_zeroed_metrics():
     case = {
         "expected_parse": {

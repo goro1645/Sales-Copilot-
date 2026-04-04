@@ -77,8 +77,7 @@ def evaluate_parse_case(case: dict[str, Any], actual_parse: Any) -> dict[str, An
         }
 
     field_exact_match = {
-        "account_name": _normalize_text(expected_parse.get("account_name"))
-        == _normalize_text(actual_parse.get("account_name"))
+        "account_name": expected_parse.get("account_name") == actual_parse.get("account_name")
     }
 
     list_field_precision: dict[str, float] = {}

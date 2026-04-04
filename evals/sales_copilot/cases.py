@@ -70,6 +70,7 @@ _ALLOWED_SEGMENTS = {
     "low_intent_or_noise",
 }
 _ALLOWED_EXPECTED_ROUTES = {
+    "need_more_info",
     "low_priority_nurture",
     "standard_follow_up",
     "high_priority_follow_up",
@@ -84,6 +85,13 @@ _ALLOWED_OPPORTUNITY_STAGES = {
 }
 _ALLOWED_LEAD_PRIORITIES = {"low", "medium", "high"}
 _STABLE_RISK_FLAG_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_DETERMINISTIC_MISSING_FACTS_TASK_TITLES = {
+    "Confirm budget range",
+    "Confirm decision timeline",
+    "Identify decision makers",
+    "Schedule qualification follow-up",
+    "Clarify qualification gaps",
+}
 _SEGMENT_CONTRACTS = {
     "high_intent_complete": {
         "lead_priority": "high",
@@ -221,7 +229,7 @@ def _validate_segment_contract(
 
     if lead_priority != contract["lead_priority"]:
         raise ValueError(f"{label} lead_priority must be {contract['lead_priority']}")
-    if expected_route != contract["expected_route"]:
+    if expected_route != contract["expected_route"] and expected_route != "need_more_info":
         raise ValueError(f"{label} expected_route must be {contract['expected_route']}")
     if lead_score_range[0] < contract["score_min"] or lead_score_range[1] > contract["score_max"]:
         raise ValueError(
@@ -239,14 +247,21 @@ def _validate_segment_contract(
         )
 
 
-def _validate_task_title_subset(
+def _validate_task_titles(
     *,
     required_task_titles: list[str],
     next_steps: list[str],
+    required_risk_flags: list[str],
     label: str,
 ) -> None:
-    if not set(required_task_titles).issubset(set(next_steps)):
-        raise ValueError(f"{label} required_task_titles must be a subset of expected_parse.next_steps")
+    for title in required_task_titles:
+        if title in next_steps:
+            continue
+        if title in _DETERMINISTIC_MISSING_FACTS_TASK_TITLES and "missing_required_facts" in required_risk_flags:
+            continue
+        raise ValueError(
+            f"{label} required_task_titles must come from expected_parse.next_steps or deterministic missing-facts tasks"
+        )
 
 
 def load_golden_cases(path: str | Path) -> list[GoldenCase]:
@@ -318,7 +333,7 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                     f"line {line_number} expected_workflow.expected_route must be one of "
                     f"{sorted(_ALLOWED_EXPECTED_ROUTES)}"
                 )
-            if expected_route != _expected_route_for_score_range(lead_score_range):
+            if expected_route != "need_more_info" and expected_route != _expected_route_for_score_range(lead_score_range):
                 raise ValueError(
                     f"line {line_number} expected_workflow.expected_route must match lead_score_range"
                 )
@@ -383,9 +398,10 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 required_task_titles=expected_workflow["required_task_titles"],
                 label=f"line {line_number} segment",
             )
-            _validate_task_title_subset(
+            _validate_task_titles(
                 required_task_titles=expected_workflow["required_task_titles"],
                 next_steps=expected_parse["next_steps"],
+                required_risk_flags=expected_workflow["required_risk_flags"],
                 label=f"line {line_number} expected_workflow",
             )
 

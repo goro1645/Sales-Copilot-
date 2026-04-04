@@ -81,11 +81,12 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
     assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["should_write_crm"] is True
     assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["should_generate_tasks"] is True
     assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["required_task_titles"] == [
+        "Clarify qualification gaps",
+    ]
+    assert by_case_id["high_intent_missing_facts"]["expected_parse"]["next_steps"] == [
         "补齐联系人信息",
         "确认预算范围",
-        "梳理决策链",
     ]
-    assert "梳理决策链" in by_case_id["high_intent_missing_facts"]["expected_parse"]["next_steps"]
     assert by_case_id["high_intent_missing_facts"]["expected_workflow"]["required_risk_flags"] == [
         "missing_required_facts"
     ]
@@ -113,9 +114,15 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["required_task_titles"] == []
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["required_risk_flags"] == []
     for case in cases:
-        assert set(case["expected_workflow"]["required_task_titles"]).issubset(
-            set(case["expected_parse"]["next_steps"])
-        )
+        allowed_missing_fact_titles = {
+            "Confirm budget range",
+            "Confirm decision timeline",
+            "Identify decision makers",
+            "Schedule qualification follow-up",
+            "Clarify qualification gaps",
+        }
+        for title in case["expected_workflow"]["required_task_titles"]:
+            assert title in case["expected_parse"]["next_steps"] or title in allowed_missing_fact_titles
 
 
 def test_load_golden_cases_raises_when_opportunity_stage_is_invalid(tmp_path):
@@ -212,6 +219,31 @@ def test_load_golden_cases_raises_when_required_task_titles_are_not_next_steps_s
 
     with pytest.raises(ValueError, match="required_task_titles"):
         load_golden_cases(path)
+
+
+def test_load_golden_cases_allows_need_more_info_route(tmp_path):
+    path = tmp_path / "need_more_info.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "need_more_info_case",
+                segment="high_intent_complete",
+                lead_score_range=[90, 100],
+                lead_priority="high",
+                opportunity_stage="proposal",
+                expected_route="need_more_info",
+                should_write_crm=True,
+                should_generate_tasks=False,
+                required_task_titles=[],
+                required_risk_flags=[],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    cases = load_golden_cases(path)
+
+    assert cases[0]["expected_workflow"]["expected_route"] == "need_more_info"
 
 
 def test_load_golden_cases_raises_when_segment_contract_is_inconsistent(tmp_path):

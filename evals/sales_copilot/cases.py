@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -62,12 +63,19 @@ _EXPECTED_WORKFLOW_FIELDS = (
     "required_task_titles",
     "required_risk_flags",
 )
+_ALLOWED_SEGMENTS = {
+    "high_intent_complete",
+    "high_intent_missing_facts",
+    "medium_intent_nurture",
+    "low_intent_or_noise",
+}
 _ALLOWED_EXPECTED_ROUTES = {
     "low_priority_nurture",
     "standard_follow_up",
     "high_priority_follow_up",
 }
 _ALLOWED_LEAD_PRIORITIES = {"low", "medium", "high"}
+_STABLE_RISK_FLAG_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 def _missing_fields(data: dict[str, object], required_fields: tuple[str, ...]) -> list[str]:
@@ -114,6 +122,14 @@ def _ensure_string_list(value: object, label: str) -> list[str]:
     return result
 
 
+def _ensure_stable_risk_flags(value: object, label: str) -> list[str]:
+    flags = _ensure_string_list(value, label)
+    for index, flag in enumerate(flags):
+        if not _STABLE_RISK_FLAG_PATTERN.fullmatch(flag):
+            raise ValueError(f"{label}[{index}] must use snake_case stable tags")
+    return flags
+
+
 def _ensure_lead_score_range(value: object, label: str) -> list[int]:
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError(f"{label} must be a list of exactly 2 integers")
@@ -138,6 +154,13 @@ def _expected_route_for_score_range(score_range: list[int]) -> str:
     if upper_bound < 80:
         return "standard_follow_up"
     return "high_priority_follow_up"
+
+
+def _ensure_segment(value: object, label: str) -> str:
+    segment = _ensure_string(value, label)
+    if segment not in _ALLOWED_SEGMENTS:
+        raise ValueError(f"{label} must be one of {sorted(_ALLOWED_SEGMENTS)}")
+    return segment
 
 
 def load_golden_cases(path: str | Path) -> list[GoldenCase]:
@@ -165,43 +188,43 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 raise ValueError(f"line {line_number} case_id must be unique: {case_id}")
             seen_case_ids.add(case_id)
 
-            _ensure_string(top_level["segment"], f"line {line_number} segment")
-            _ensure_string(top_level["customer_profile_text"], f"line {line_number} customer_profile_text")
-            _ensure_string(top_level["meeting_note_text"], f"line {line_number} meeting_note_text")
+            segment = _ensure_segment(top_level["segment"], f"line {line_number} segment")
+            customer_profile_text = _ensure_string(top_level["customer_profile_text"], f"line {line_number} customer_profile_text")
+            meeting_note_text = _ensure_string(top_level["meeting_note_text"], f"line {line_number} meeting_note_text")
 
-            expected_parse = _ensure_object(top_level["expected_parse"], f"line {line_number} expected_parse")
+            expected_parse_raw = _ensure_object(top_level["expected_parse"], f"line {line_number} expected_parse")
             _validate_fields(
-                expected_parse,
+                expected_parse_raw,
                 _EXPECTED_PARSE_FIELDS,
                 f"line {line_number} expected_parse",
                 "required_parse_fields",
             )
             expected_parse = {
-                "account_name": _ensure_string(expected_parse["account_name"], f"line {line_number} expected_parse.account_name"),
-                "customer_roles": _ensure_string_list(expected_parse["customer_roles"], f"line {line_number} expected_parse.customer_roles"),
-                "confirmed_needs": _ensure_string_list(expected_parse["confirmed_needs"], f"line {line_number} expected_parse.confirmed_needs"),
-                "budget_signals": _ensure_string_list(expected_parse["budget_signals"], f"line {line_number} expected_parse.budget_signals"),
-                "timeline_signals": _ensure_string_list(expected_parse["timeline_signals"], f"line {line_number} expected_parse.timeline_signals"),
-                "next_steps": _ensure_string_list(expected_parse["next_steps"], f"line {line_number} expected_parse.next_steps"),
-                "competitors": _ensure_string_list(expected_parse["competitors"], f"line {line_number} expected_parse.competitors"),
+                "account_name": _ensure_string(expected_parse_raw["account_name"], f"line {line_number} expected_parse.account_name"),
+                "customer_roles": _ensure_string_list(expected_parse_raw["customer_roles"], f"line {line_number} expected_parse.customer_roles"),
+                "confirmed_needs": _ensure_string_list(expected_parse_raw["confirmed_needs"], f"line {line_number} expected_parse.confirmed_needs"),
+                "budget_signals": _ensure_string_list(expected_parse_raw["budget_signals"], f"line {line_number} expected_parse.budget_signals"),
+                "timeline_signals": _ensure_string_list(expected_parse_raw["timeline_signals"], f"line {line_number} expected_parse.timeline_signals"),
+                "next_steps": _ensure_string_list(expected_parse_raw["next_steps"], f"line {line_number} expected_parse.next_steps"),
+                "competitors": _ensure_string_list(expected_parse_raw["competitors"], f"line {line_number} expected_parse.competitors"),
             }
 
-            expected_workflow = _ensure_object(
+            expected_workflow_raw = _ensure_object(
                 top_level["expected_workflow"],
                 f"line {line_number} expected_workflow",
             )
             _validate_fields(
-                expected_workflow,
+                expected_workflow_raw,
                 _EXPECTED_WORKFLOW_FIELDS,
                 f"line {line_number} expected_workflow",
                 "required_workflow_fields",
             )
             lead_score_range = _ensure_lead_score_range(
-                expected_workflow["lead_score_range"],
+                expected_workflow_raw["lead_score_range"],
                 f"line {line_number} expected_workflow.lead_score_range",
             )
             expected_route = _ensure_string(
-                expected_workflow["expected_route"],
+                expected_workflow_raw["expected_route"],
                 f"line {line_number} expected_workflow.expected_route",
             )
             if expected_route not in _ALLOWED_EXPECTED_ROUTES:
@@ -215,7 +238,7 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 )
 
             lead_priority = _ensure_string(
-                expected_workflow["lead_priority"],
+                expected_workflow_raw["lead_priority"],
                 f"line {line_number} expected_workflow.lead_priority",
             )
             if lead_priority not in _ALLOWED_LEAD_PRIORITIES:
@@ -224,28 +247,36 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                     f"{sorted(_ALLOWED_LEAD_PRIORITIES)}"
                 )
 
+            should_generate_tasks = _ensure_bool(
+                expected_workflow_raw["should_generate_tasks"],
+                f"line {line_number} expected_workflow.should_generate_tasks",
+            )
+            required_task_titles = _ensure_string_list(
+                expected_workflow_raw["required_task_titles"],
+                f"line {line_number} expected_workflow.required_task_titles",
+            )
+            if not should_generate_tasks and required_task_titles:
+                raise ValueError(
+                    f"line {line_number} expected_workflow.required_task_titles must be empty when "
+                    "should_generate_tasks is false"
+                )
+
             expected_workflow = {
                 "lead_score_range": lead_score_range,
                 "lead_priority": lead_priority,
                 "opportunity_stage": _ensure_string(
-                    expected_workflow["opportunity_stage"],
+                    expected_workflow_raw["opportunity_stage"],
                     f"line {line_number} expected_workflow.opportunity_stage",
                 ),
                 "expected_route": expected_route,
                 "should_write_crm": _ensure_bool(
-                    expected_workflow["should_write_crm"],
+                    expected_workflow_raw["should_write_crm"],
                     f"line {line_number} expected_workflow.should_write_crm",
                 ),
-                "should_generate_tasks": _ensure_bool(
-                    expected_workflow["should_generate_tasks"],
-                    f"line {line_number} expected_workflow.should_generate_tasks",
-                ),
-                "required_task_titles": _ensure_string_list(
-                    expected_workflow["required_task_titles"],
-                    f"line {line_number} expected_workflow.required_task_titles",
-                ),
-                "required_risk_flags": _ensure_string_list(
-                    expected_workflow["required_risk_flags"],
+                "should_generate_tasks": should_generate_tasks,
+                "required_task_titles": required_task_titles,
+                "required_risk_flags": _ensure_stable_risk_flags(
+                    expected_workflow_raw["required_risk_flags"],
                     f"line {line_number} expected_workflow.required_risk_flags",
                 ),
             }
@@ -255,9 +286,9 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                     GoldenCase,
                     {
                         "case_id": case_id,
-                        "segment": top_level["segment"],
-                        "customer_profile_text": top_level["customer_profile_text"],
-                        "meeting_note_text": top_level["meeting_note_text"],
+                        "segment": segment,
+                        "customer_profile_text": customer_profile_text,
+                        "meeting_note_text": meeting_note_text,
                         "expected_parse": cast(ExpectedParse, expected_parse),
                         "expected_workflow": cast(ExpectedWorkflow, expected_workflow),
                     },

@@ -28,12 +28,21 @@ class ExpectedWorkflow(TypedDict):
 
 class GoldenCase(TypedDict):
     case_id: str
-    input_text: str
+    segment: str
+    customer_profile_text: str
+    meeting_note_text: str
     expected_parse: ExpectedParse
     expected_workflow: ExpectedWorkflow
 
 
-_TOP_LEVEL_FIELDS = ("case_id", "input_text", "expected_parse", "expected_workflow")
+_TOP_LEVEL_FIELDS = (
+    "case_id",
+    "segment",
+    "customer_profile_text",
+    "meeting_note_text",
+    "expected_parse",
+    "expected_workflow",
+)
 _EXPECTED_PARSE_FIELDS = (
     "account_name",
     "customer_roles",
@@ -88,7 +97,12 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
 
             record = json.loads(line)
             top_level = _ensure_object(record, f"line {line_number}")
-            _validate_fields(top_level, _TOP_LEVEL_FIELDS, f"line {line_number}", "required_top_level_fields")
+            _validate_fields(
+                top_level,
+                _TOP_LEVEL_FIELDS,
+                f"line {line_number}",
+                "required_top_level_fields",
+            )
 
             expected_parse = _ensure_object(top_level["expected_parse"], f"line {line_number} expected_parse")
             _validate_fields(
@@ -114,7 +128,9 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                     GoldenCase,
                     {
                         "case_id": top_level["case_id"],
-                        "input_text": top_level["input_text"],
+                        "segment": top_level["segment"],
+                        "customer_profile_text": top_level["customer_profile_text"],
+                        "meeting_note_text": top_level["meeting_note_text"],
                         "expected_parse": cast(ExpectedParse, expected_parse),
                         "expected_workflow": cast(ExpectedWorkflow, expected_workflow),
                     },

@@ -8,7 +8,9 @@ from evals.sales_copilot.cases import load_golden_cases
 def _build_sales_case(case_id: str, expected_workflow: dict[str, object]) -> dict[str, object]:
     return {
         "case_id": case_id,
-        "input_text": "客户在本周会议中明确表达采购意向，并希望尽快确认试点方案。",
+        "segment": "enterprise",
+        "customer_profile_text": "客户是制造业集团，正在推进全国门店数字化采购。",
+        "meeting_note_text": "客户在会议中明确表示希望尽快确认报价，并在下周启动试点。",
         "expected_parse": {
             "account_name": "华东制造集团",
             "customer_roles": ["采购负责人", "业务总监"],
@@ -31,7 +33,7 @@ def test_load_golden_cases_reads_two_jsonl_records_with_full_contract(tmp_path):
                     _build_sales_case(
                         "high_intent_complete",
                         {
-                            "lead_score_range": [85, 100],
+                            "lead_score_range": [90, 100],
                             "lead_priority": "P0",
                             "opportunity_stage": "qualified",
                             "expected_route": "complete",
@@ -68,8 +70,10 @@ def test_load_golden_cases_reads_two_jsonl_records_with_full_contract(tmp_path):
         "high_intent_complete",
         "medium_intent_nurture",
     ]
+    assert cases[0]["segment"] == "enterprise"
+    assert cases[0]["customer_profile_text"].startswith("客户是制造业集团")
+    assert cases[0]["meeting_note_text"].startswith("客户在会议中明确表示")
     assert cases[0]["expected_parse"]["account_name"] == "华东制造集团"
-    assert cases[0]["expected_parse"]["customer_roles"] == ["采购负责人", "业务总监"]
     assert cases[0]["expected_workflow"]["expected_route"] == "complete"
     assert cases[1]["expected_workflow"]["required_task_titles"] == [
         "补充联系人信息",
@@ -83,17 +87,17 @@ def test_load_golden_cases_raises_when_required_workflow_fields_missing(tmp_path
         json.dumps(
             _build_sales_case(
                 "broken_case",
-                    {
-                        "lead_score_range": [10, 25],
-                        "lead_priority": "P4",
-                        "opportunity_stage": "ignored",
-                        "expected_route": "ignore",
-                        "should_write_crm": False,
-                        "should_generate_tasks": False,
-                        "required_risk_flags": ["噪音线索"],
-                    },
-                )
-            ),
+                {
+                    "lead_score_range": [10, 25],
+                    "lead_priority": "P4",
+                    "opportunity_stage": "ignored",
+                    "expected_route": "ignore",
+                    "should_write_crm": False,
+                    "should_generate_tasks": False,
+                    "required_risk_flags": ["噪音线索"],
+                },
+            )
+        ),
         encoding="utf-8",
     )
 

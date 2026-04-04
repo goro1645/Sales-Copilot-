@@ -148,3 +148,73 @@ def test_load_golden_cases_raises_when_tasks_are_disabled_but_titles_exist(tmp_p
 
     with pytest.raises(ValueError, match="should_generate_tasks"):
         load_golden_cases(path)
+
+
+def test_load_golden_cases_strips_whitespace_from_strings_and_lists(tmp_path):
+    path = tmp_path / "whitespace_case.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "case_id": "  spaced_case  ",
+                "segment": "  medium_intent_nurture  ",
+                "customer_profile_text": "  华东制造集团正在推进全国门店数字化采购升级。  ",
+                "meeting_note_text": "  客户愿意先看方案和案例。  ",
+                "expected_parse": {
+                    "account_name": "  华东制造集团  ",
+                    "customer_roles": ["  采购负责人  ", "  业务总监"],
+                    "confirmed_needs": ["  方案说明  "],
+                    "budget_signals": ["  预算待内部评估  "],
+                    "timeline_signals": ["  下周再安排会议  "],
+                    "next_steps": ["  发送案例资料  "],
+                    "competitors": ["  竞品C  "],
+                },
+                "expected_workflow": {
+                    "lead_score_range": [55, 69],
+                    "lead_priority": "  medium  ",
+                    "opportunity_stage": "  discovery  ",
+                    "expected_route": "  standard_follow_up  ",
+                    "should_write_crm": True,
+                    "should_generate_tasks": True,
+                    "required_task_titles": ["  发送案例资料  "],
+                    "required_risk_flags": ["  missing_required_facts  "],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cases = load_golden_cases(path)
+
+    assert cases[0]["case_id"] == "spaced_case"
+    assert cases[0]["segment"] == "medium_intent_nurture"
+    assert cases[0]["expected_parse"]["account_name"] == "华东制造集团"
+    assert cases[0]["expected_parse"]["customer_roles"] == ["采购负责人", "业务总监"]
+    assert cases[0]["expected_workflow"]["lead_priority"] == "medium"
+    assert cases[0]["expected_workflow"]["opportunity_stage"] == "discovery"
+    assert cases[0]["expected_workflow"]["expected_route"] == "standard_follow_up"
+    assert cases[0]["expected_workflow"]["required_task_titles"] == ["发送案例资料"]
+    assert cases[0]["expected_workflow"]["required_risk_flags"] == ["missing_required_facts"]
+
+
+def test_load_golden_cases_raises_when_tasks_enabled_but_titles_missing(tmp_path):
+    path = tmp_path / "missing_titles.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "missing_titles_case",
+                segment="medium_intent_nurture",
+                lead_score_range=[55, 69],
+                lead_priority="medium",
+                opportunity_stage="discovery",
+                expected_route="standard_follow_up",
+                should_write_crm=True,
+                should_generate_tasks=True,
+                required_task_titles=[],
+                required_risk_flags=["missing_required_facts"],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="should_generate_tasks"):
+        load_golden_cases(path)

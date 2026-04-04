@@ -102,7 +102,7 @@ def _validate_fields(
 def _ensure_string(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} must be a non-empty string")
-    return value
+    return value.strip()
 
 
 def _ensure_bool(value: object, label: str) -> bool:
@@ -118,7 +118,7 @@ def _ensure_string_list(value: object, label: str) -> list[str]:
     for index, item in enumerate(value):
         if not isinstance(item, str) or not item.strip():
             raise ValueError(f"{label}[{index}] must be a non-empty string")
-        result.append(item)
+        result.append(item.strip())
     return result
 
 
@@ -259,6 +259,11 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 raise ValueError(
                     f"line {line_number} expected_workflow.required_task_titles must be empty when "
                     "should_generate_tasks is false"
+                )
+            if should_generate_tasks and not required_task_titles:
+                raise ValueError(
+                    f"line {line_number} expected_workflow.required_task_titles must not be empty when "
+                    "should_generate_tasks is true"
                 )
 
             expected_workflow = {

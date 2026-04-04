@@ -229,6 +229,8 @@ def _validate_segment_contract(
         )
     if segment == "high_intent_missing_facts" and "missing_required_facts" not in required_risk_flags:
         raise ValueError(f"{label} missing_required_facts must be present for this segment")
+    if segment != "high_intent_missing_facts" and "missing_required_facts" in required_risk_flags:
+        raise ValueError(f"{label} missing_required_facts is only allowed for high_intent_missing_facts")
     if "missing_required_facts" in required_risk_flags and (
         not should_generate_tasks or not required_task_titles
     ):

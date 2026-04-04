@@ -18,7 +18,9 @@ def _build_sales_case(
     should_generate_tasks: bool,
     required_task_titles: list[str],
     required_risk_flags: list[str],
+    next_steps: list[str] | None = None,
 ) -> dict[str, object]:
+    resolved_next_steps = next_steps or ["发送正式报价单", "安排试点评审会"]
     return {
         "case_id": case_id,
         "segment": segment,
@@ -30,7 +32,7 @@ def _build_sales_case(
             "confirmed_needs": ["试点方案", "报价单", "交付排期"],
             "budget_signals": ["年度预算已预留", "可以先走采购流程"],
             "timeline_signals": ["本周确认报价", "下周启动试点"],
-            "next_steps": ["发送正式报价单", "安排试点评审会"],
+            "next_steps": resolved_next_steps,
             "competitors": ["竞品A"],
         },
         "expected_workflow": {
@@ -233,4 +235,29 @@ def test_load_golden_cases_raises_when_segment_contract_is_inconsistent(tmp_path
     )
 
     with pytest.raises(ValueError, match="segment"):
+        load_golden_cases(path)
+
+
+def test_load_golden_cases_raises_when_missing_required_facts_appears_in_other_segments(tmp_path):
+    path = tmp_path / "bad_missing_required_facts_segment.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "bad_missing_required_facts_segment",
+                segment="medium_intent_nurture",
+                lead_score_range=[55, 69],
+                lead_priority="medium",
+                opportunity_stage="discovery",
+                expected_route="standard_follow_up",
+                should_write_crm=True,
+                should_generate_tasks=True,
+                required_task_titles=["发送案例资料"],
+                required_risk_flags=["missing_required_facts"],
+                next_steps=["发送案例资料"],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="missing_required_facts"):
         load_golden_cases(path)

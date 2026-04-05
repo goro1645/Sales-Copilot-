@@ -36,6 +36,10 @@ def _normalize_list(value: Any) -> list[str]:
     return items
 
 
+def _is_string_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
 def _set_precision_recall_f1(expected: list[str], actual: list[str]) -> tuple[float, float, float]:
     expected_set = set(expected)
     actual_set = set(actual)
@@ -61,6 +65,17 @@ def _required_risk_flags(case: dict[str, Any]) -> list[str]:
     return _normalize_list(expected_workflow.get("required_risk_flags", []))
 
 
+def _is_valid_actual_parse(actual_parse: dict[str, Any]) -> bool:
+    if not isinstance(actual_parse.get("account_name"), str):
+        return False
+    for field in LIST_FIELDS:
+        if not _is_string_list(actual_parse.get(field)):
+            return False
+    if not _is_string_list(actual_parse.get("risk_flags", [])):
+        return False
+    return True
+
+
 def evaluate_parse_case(case: dict[str, Any], actual_parse: Any) -> dict[str, Any]:
     expected_parse = case.get("expected_parse", {})
     if not isinstance(expected_parse, dict):
@@ -73,7 +88,21 @@ def evaluate_parse_case(case: dict[str, Any], actual_parse: Any) -> dict[str, An
             "list_field_precision": {field: 0.0 for field in LIST_FIELDS},
             "list_field_recall": {field: 0.0 for field in LIST_FIELDS},
             "list_field_f1": {field: 0.0 for field in LIST_FIELDS},
+            "list_field_applicable": {field: False for field in LIST_FIELDS},
             "risk_flag_recall": 0.0,
+            "risk_flag_applicable": False,
+        }
+
+    if not _is_valid_actual_parse(actual_parse):
+        return {
+            "json_valid": False,
+            "field_exact_match": {field: 0.0 for field in SCALAR_FIELDS},
+            "list_field_precision": {field: 0.0 for field in LIST_FIELDS},
+            "list_field_recall": {field: 0.0 for field in LIST_FIELDS},
+            "list_field_f1": {field: 0.0 for field in LIST_FIELDS},
+            "list_field_applicable": {field: False for field in LIST_FIELDS},
+            "risk_flag_recall": 0.0,
+            "risk_flag_applicable": False,
         }
 
     field_exact_match = {
@@ -83,19 +112,25 @@ def evaluate_parse_case(case: dict[str, Any], actual_parse: Any) -> dict[str, An
     list_field_precision: dict[str, float] = {}
     list_field_recall: dict[str, float] = {}
     list_field_f1: dict[str, float] = {}
+    list_field_applicable: dict[str, bool] = {}
     for field in LIST_FIELDS:
-        precision, recall, f1 = _set_precision_recall_f1(
-            _normalize_list(expected_parse.get(field, [])),
-            _normalize_list(actual_parse.get(field, [])),
-        )
+        expected_values = _normalize_list(expected_parse.get(field, []))
+        actual_values = _normalize_list(actual_parse.get(field, []))
+        applicable = bool(expected_values or actual_values)
+        if applicable:
+            precision, recall, f1 = _set_precision_recall_f1(expected_values, actual_values)
+        else:
+            precision, recall, f1 = 0.0, 0.0, 0.0
         list_field_precision[field] = precision
         list_field_recall[field] = recall
         list_field_f1[field] = f1
+        list_field_applicable[field] = applicable
 
     risk_flags = _normalize_list(actual_parse.get("risk_flags", []))
     required_risk_flags = _required_risk_flags(case)
-    if not required_risk_flags:
-        risk_flag_recall = 1.0
+    risk_flag_applicable = bool(required_risk_flags)
+    if not risk_flag_applicable:
+        risk_flag_recall = 0.0
     else:
         risk_flag_recall = len(set(required_risk_flags) & set(risk_flags)) / len(set(required_risk_flags))
 
@@ -105,7 +140,9 @@ def evaluate_parse_case(case: dict[str, Any], actual_parse: Any) -> dict[str, An
         "list_field_precision": list_field_precision,
         "list_field_recall": list_field_recall,
         "list_field_f1": list_field_f1,
+        "list_field_applicable": list_field_applicable,
         "risk_flag_recall": risk_flag_recall,
+        "risk_flag_applicable": risk_flag_applicable,
     }
 
 
@@ -130,11 +167,21 @@ def summarize_parse_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     list_field_f1_values: list[float] = []
     for row in rows:
         list_field_f1 = row.get("list_field_f1", {})
+        list_field_applicable = row.get("list_field_applicable", {})
         if isinstance(list_field_f1, dict):
-            list_field_f1_values.extend(float(list_field_f1.get(field, 0.0)) for field in LIST_FIELDS)
+            list_field_f1_values.extend(
+                float(list_field_f1.get(field, 0.0))
+                for field in LIST_FIELDS
+                if isinstance(list_field_applicable, dict) and list_field_applicable.get(field, False)
+            )
 
     average_list_field_f1 = sum(list_field_f1_values) / len(list_field_f1_values) if list_field_f1_values else 0.0
-    risk_flag_recall = sum(float(row.get("risk_flag_recall", 0.0)) for row in rows) / total
+    risk_flag_values = [
+        float(row.get("risk_flag_recall", 0.0))
+        for row in rows
+        if row.get("risk_flag_applicable", False)
+    ]
+    risk_flag_recall = sum(risk_flag_values) / len(risk_flag_values) if risk_flag_values else 0.0
 
     return {
         "json_valid_rate": json_valid_rate,

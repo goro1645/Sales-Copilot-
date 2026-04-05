@@ -89,6 +89,36 @@ def test_evaluate_parse_case_marks_invalid_json_as_zeroed_metrics():
     assert metrics["risk_flag_recall"] == 0
 
 
+def test_evaluate_parse_case_marks_malformed_list_schema_as_invalid():
+    case = {
+        "expected_parse": {
+            "account_name": "BluePeak Health",
+            "customer_roles": ["CIO"],
+            "confirmed_needs": [],
+            "budget_signals": [],
+            "timeline_signals": [],
+            "next_steps": [],
+            "competitors": [],
+        },
+        "expected_workflow": {"required_risk_flags": []},
+    }
+    actual_parse = {
+        "account_name": "BluePeak Health",
+        "customer_roles": "CIO",
+        "confirmed_needs": [],
+        "budget_signals": [],
+        "timeline_signals": [],
+        "next_steps": [],
+        "competitors": [],
+        "risk_flags": [],
+    }
+
+    metrics = evaluate_parse_case(case, actual_parse)
+
+    assert metrics["json_valid"] is False
+    assert metrics["list_field_f1"]["customer_roles"] == 0
+
+
 def test_summarize_parse_metrics_aggregates_json_validity_and_average_f1():
     rows = [
         {
@@ -97,12 +127,21 @@ def test_summarize_parse_metrics_aggregates_json_validity_and_average_f1():
             "list_field_f1": {
                 "customer_roles": 1.0,
                 "confirmed_needs": 1.0,
-                "budget_signals": 1.0,
-                "timeline_signals": 1.0,
-                "next_steps": 1.0,
-                "competitors": 1.0,
+                "budget_signals": 0.0,
+                "timeline_signals": 0.0,
+                "next_steps": 0.0,
+                "competitors": 0.0,
+            },
+            "list_field_applicable": {
+                "customer_roles": True,
+                "confirmed_needs": True,
+                "budget_signals": False,
+                "timeline_signals": False,
+                "next_steps": False,
+                "competitors": False,
             },
             "risk_flag_recall": 1.0,
+            "risk_flag_applicable": True,
         },
         {
             "json_valid": False,
@@ -115,7 +154,16 @@ def test_summarize_parse_metrics_aggregates_json_validity_and_average_f1():
                 "next_steps": 0.0,
                 "competitors": 0.0,
             },
+            "list_field_applicable": {
+                "customer_roles": True,
+                "confirmed_needs": True,
+                "budget_signals": False,
+                "timeline_signals": False,
+                "next_steps": False,
+                "competitors": False,
+            },
             "risk_flag_recall": 0.0,
+            "risk_flag_applicable": True,
         },
     ]
 
@@ -125,3 +173,59 @@ def test_summarize_parse_metrics_aggregates_json_validity_and_average_f1():
     assert summary["field_exact_match_rate"]["account_name"] == 0.5
     assert summary["average_list_field_f1"] == 0.5
     assert summary["risk_flag_recall"] == 0.5
+
+
+def test_summarize_parse_metrics_ignores_non_applicable_risk_flags():
+    rows = [
+        {
+            "json_valid": True,
+            "field_exact_match": {"account_name": True},
+            "list_field_f1": {field: 0.0 for field in ("customer_roles", "confirmed_needs", "budget_signals", "timeline_signals", "next_steps", "competitors")},
+            "list_field_applicable": {field: False for field in ("customer_roles", "confirmed_needs", "budget_signals", "timeline_signals", "next_steps", "competitors")},
+            "risk_flag_recall": 0.0,
+            "risk_flag_applicable": False,
+        },
+        {
+            "json_valid": True,
+            "field_exact_match": {"account_name": True},
+            "list_field_f1": {field: 0.0 for field in ("customer_roles", "confirmed_needs", "budget_signals", "timeline_signals", "next_steps", "competitors")},
+            "list_field_applicable": {field: False for field in ("customer_roles", "confirmed_needs", "budget_signals", "timeline_signals", "next_steps", "competitors")},
+            "risk_flag_recall": 1.0,
+            "risk_flag_applicable": True,
+        },
+    ]
+
+    summary = summarize_parse_metrics(rows)
+
+    assert summary["risk_flag_recall"] == 1.0
+
+
+def test_summarize_parse_metrics_ignores_empty_list_fields_in_average():
+    rows = [
+        {
+            "json_valid": True,
+            "field_exact_match": {"account_name": True},
+            "list_field_f1": {
+                "customer_roles": 0.0,
+                "confirmed_needs": 0.0,
+                "budget_signals": 0.0,
+                "timeline_signals": 0.0,
+                "next_steps": 0.0,
+                "competitors": 0.0,
+            },
+            "list_field_applicable": {
+                "customer_roles": True,
+                "confirmed_needs": False,
+                "budget_signals": False,
+                "timeline_signals": False,
+                "next_steps": False,
+                "competitors": False,
+            },
+            "risk_flag_recall": 0.0,
+            "risk_flag_applicable": False,
+        }
+    ]
+
+    summary = summarize_parse_metrics(rows)
+
+    assert summary["average_list_field_f1"] == 0.0

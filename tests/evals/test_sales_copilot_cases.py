@@ -277,6 +277,31 @@ def test_load_golden_cases_raises_when_standard_route_has_no_score_overlap(tmp_p
         load_golden_cases(path)
 
 
+def test_load_golden_cases_raises_when_route_spillover_is_too_wide(tmp_path):
+    path = tmp_path / "too_wide_spillover.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "too_wide_spillover",
+                segment="high_intent_missing_facts",
+                lead_score_range=[50, 100],
+                lead_priority="high",
+                opportunity_stage="qualification",
+                expected_route="standard_follow_up",
+                should_write_crm=True,
+                should_generate_tasks=True,
+                required_task_titles=["Clarify qualification gaps"],
+                required_risk_flags=["missing_required_facts"],
+                next_steps=["Clarify qualification gaps"],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="overlap"):
+        load_golden_cases(path)
+
+
 def test_load_golden_cases_raises_when_tasks_enabled_but_titles_missing(tmp_path):
     path = tmp_path / "missing_titles.jsonl"
     path.write_text(

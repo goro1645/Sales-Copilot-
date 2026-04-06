@@ -90,6 +90,7 @@ _ROUTE_SCORE_BANDS = {
     "standard_follow_up": (50, 79),
     "high_priority_follow_up": (80, 100),
 }
+_ROUTE_SCORE_BAND_SPILLOVER_LIMIT = 3
 _DETERMINISTIC_MISSING_FACTS_TASK_TITLES = {
     "Confirm budget range",
     "Confirm decision timeline",
@@ -200,7 +201,12 @@ def _score_range_overlaps_route(score_range: list[int], route: str) -> bool:
         return False
     score_min, score_max = score_range
     route_min, route_max = route_band
-    return not (score_max < route_min or score_min > route_max)
+    if score_max < route_min or score_min > route_max:
+        return False
+
+    spillover_below = max(0, route_min - score_min)
+    spillover_above = max(0, score_max - route_max)
+    return spillover_below + spillover_above <= _ROUTE_SCORE_BAND_SPILLOVER_LIMIT
 
 
 def _ensure_segment(value: object, label: str) -> str:

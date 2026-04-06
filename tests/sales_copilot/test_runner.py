@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from sales_copilot.mcp_client import SalesCopilotMCPClient
+from sales_copilot.mcp_server import SalesCopilotMCPServer
 from sales_copilot.storage import (
     get_account_by_id,
     get_account_memory,
@@ -89,6 +91,52 @@ class RefreshingLLM:
         raise AssertionError(f"Unexpected prompt: {prompt_text}")
 
 
+class RecordingMCPClient:
+    def __init__(self, inner_client) -> None:
+        self.inner_client = inner_client
+        self.calls: list[tuple[str, dict]] = []
+
+    def create_task(
+        self,
+        *,
+        account_id: int,
+        meeting_id: int,
+        title: str,
+        description: str,
+        priority: str,
+        due_at: str,
+        status: str = "open",
+    ):
+        arguments = {
+            "account_id": account_id,
+            "meeting_id": meeting_id,
+            "title": title,
+            "description": description,
+            "priority": priority,
+            "due_at": due_at,
+            "status": status,
+        }
+        self.calls.append(("create_task", arguments))
+        return self.inner_client.create_task(**arguments)
+
+    def update_account_stage(
+        self,
+        *,
+        account_id: int,
+        status: str,
+        opportunity_stage: str,
+        last_contact_at: str,
+    ):
+        arguments = {
+            "account_id": account_id,
+            "status": status,
+            "opportunity_stage": opportunity_stage,
+            "last_contact_at": last_contact_at,
+        }
+        self.calls.append(("update_account_stage", arguments))
+        return self.inner_client.update_account_stage(**arguments)
+
+
 def test_run_sales_copilot_returns_dashboard_and_crm_ids(tmp_path: Path):
     result = run_sales_copilot(
         customer_profile_text="Acme Robotics is a manufacturing company.",
@@ -100,6 +148,65 @@ def test_run_sales_copilot_returns_dashboard_and_crm_ids(tmp_path: Path):
     assert result["lead_score"] == 88
     assert result["dashboard_output"]["account_name"] == "Acme Robotics"
     assert result["crm_update_ids"]
+
+
+def test_run_sales_copilot_mcp_mode_uses_mcp_client_for_write_back(tmp_path: Path):
+    db_path = tmp_path / "sales.db"
+    mcp_client = RecordingMCPClient(SalesCopilotMCPClient(SalesCopilotMCPServer(db_path)))
+
+    result = run_sales_copilot(
+        customer_profile_text="Acme Robotics is a manufacturing company.",
+        meeting_note_text="CTO requested a proposal for private deployment.",
+        database_path=db_path,
+        llm_client=FakeLLM(),
+        execution_mode="mcp",
+        mcp_client=mcp_client,
+    )
+
+    account = get_account_by_id(db_path, result["account_id"])
+    memory_row = get_account_memory(db_path, result["account_id"])
+
+    assert account is not None
+    assert account["opportunity_stage"] == "proposal"
+    assert account["status"] == "active"
+    assert len(list_meeting_records(db_path)) == 1
+    assert len(list_tasks(db_path)) == 1
+    assert len(list_crm_updates(db_path)) == 0
+    assert memory_row is not None
+    assert "private deployment" in memory_row["confirmed_needs_json"]
+    assert [tool_name for tool_name, _arguments in mcp_client.calls] == ["create_task", "update_account_stage"]
+
+
+def test_run_sales_copilot_mcp_mode_requires_mcp_client(tmp_path: Path):
+    try:
+        run_sales_copilot(
+            customer_profile_text="Acme Robotics is a manufacturing company.",
+            meeting_note_text="CTO requested a proposal for private deployment.",
+            database_path=tmp_path / "sales.db",
+            llm_client=FakeLLM(),
+            execution_mode="mcp",
+        )
+    except ValueError as exc:
+        assert "mcp_client" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError when mcp mode is used without an mcp_client")
+
+
+def test_run_sales_copilot_rejects_unsupported_execution_mode(tmp_path: Path):
+    try:
+        run_sales_copilot(
+            customer_profile_text="Acme Robotics is a manufacturing company.",
+            meeting_note_text="CTO requested a proposal for private deployment.",
+            database_path=tmp_path / "sales.db",
+            llm_client=FakeLLM(),
+            execution_mode="hybrid",
+        )
+    except ValueError as exc:
+        assert "execution_mode" in str(exc)
+        assert "direct" in str(exc)
+        assert "mcp" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for unsupported execution mode")
 
 
 def test_run_sales_copilot_turns_missing_facts_into_follow_up_tasks_and_crm_write_back(tmp_path: Path):

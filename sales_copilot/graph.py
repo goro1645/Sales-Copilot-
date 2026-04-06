@@ -579,10 +579,16 @@ def high_priority_follow_up_node(state: SalesCopilotState, *, llm_client, databa
     return _step_result(state, "high_priority_follow_up", {"follow_up_plan": payload, "task_payload": list(payload.get("tasks", []))})
 
 
-def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
+def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_path=None, mcp_client=None) -> dict[str, Any]:
     del llm_client
     if database_path is None:
         return _step_result(state, "write_back_crm", {"crm_update_ids": []})
+
+    execution_mode = str(state.get("execution_mode", "direct"))
+    if execution_mode not in {"direct", "mcp"}:
+        raise ValueError("execution_mode must be one of: direct, mcp")
+    if execution_mode == "mcp" and mcp_client is None:
+        raise ValueError("mcp mode requires an mcp_client")
 
     account_name = _resolve_account_name(state, database_path=database_path)
     account_id = state.get("account_id")
@@ -633,6 +639,23 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
             continue
         title = str(task.get("title", "Follow up"))
         due_at = str(task.get("due_at", date.today().isoformat()))
+        description = task.get("description", title)
+        priority = task.get("priority", state.get("lead_priority", "medium"))
+        status = task.get("status", "open")
+
+        if execution_mode == "mcp":
+            result = mcp_client.create_task(
+                account_id=account_id,
+                meeting_id=meeting_id,
+                title=title,
+                description=str(description),
+                priority=str(priority),
+                due_at=due_at,
+                status=str(status),
+            )
+            task_ids.append(int(result["task_id"]))
+            continue
+
         existing_task_id = _find_existing_task(
             database_path,
             account_id=account_id,
@@ -644,10 +667,10 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
                 database_path,
                 task_id=existing_task_id,
                 record={
-                    "description": task.get("description", title),
-                    "priority": task.get("priority", state.get("lead_priority", "medium")),
+                    "description": description,
+                    "priority": priority,
                     "due_at": due_at,
-                    "status": task.get("status", "open"),
+                    "status": status,
                 },
             )
             task_ids.append(existing_task_id)
@@ -659,10 +682,10 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
                     "account_id": account_id,
                     "meeting_id": meeting_id,
                     "title": title,
-                    "description": task.get("description", title),
-                    "priority": task.get("priority", state.get("lead_priority", "medium")),
+                    "description": description,
+                    "priority": priority,
                     "due_at": due_at,
-                    "status": task.get("status", "open"),
+                    "status": status,
                 },
             )
         )
@@ -673,28 +696,37 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
         "opportunity_stage": state.get("opportunity_stage", "discovery"),
         "last_contact_at": date.today().isoformat(),
     }
-    crm_after_json = json.dumps(crm_after, ensure_ascii=False)
-    existing_crm_update_id = _find_existing_crm_update(
-        database_path,
-        account_id=account_id,
-        meeting_id=meeting_id,
-        after_json=crm_after_json,
-    )
-    if existing_crm_update_id is not None:
-        update_account_stage_and_status(
-            database_path,
+    if execution_mode == "mcp":
+        mcp_client.update_account_stage(
             account_id=account_id,
             status=crm_after["status"],
             opportunity_stage=crm_after["opportunity_stage"],
             last_contact_at=crm_after["last_contact_at"],
         )
-        crm_update_id = existing_crm_update_id
+        crm_update_id = None
     else:
-        crm_update_id = update_crm_account(
+        crm_after_json = json.dumps(crm_after, ensure_ascii=False)
+        existing_crm_update_id = _find_existing_crm_update(
             database_path,
-            account_id,
-            crm_after,
+            account_id=account_id,
+            meeting_id=meeting_id,
+            after_json=crm_after_json,
         )
+        if existing_crm_update_id is not None:
+            update_account_stage_and_status(
+                database_path,
+                account_id=account_id,
+                status=crm_after["status"],
+                opportunity_stage=crm_after["opportunity_stage"],
+                last_contact_at=crm_after["last_contact_at"],
+            )
+            crm_update_id = existing_crm_update_id
+        else:
+            crm_update_id = update_crm_account(
+                database_path,
+                account_id,
+                crm_after,
+            )
 
     recommended_next_step = str((state.get("follow_up_plan") or {}).get("summary", "")).strip()
     memory_payload = {
@@ -726,7 +758,7 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
         {
             "account_id": account_id,
             "meeting_id": meeting_id,
-            "crm_update_ids": [crm_update_id],
+            "crm_update_ids": [crm_update_id] if crm_update_id is not None else [],
             "task_payload": task_payload,
             "task_ids": task_ids,
         },
@@ -795,11 +827,16 @@ def route_after_lead_evaluation(state: SalesCopilotState) -> str:
     return "high_priority_follow_up"
 
 
-def _bind_node(node: Callable[..., dict[str, Any]], *, llm_client=None, database_path=None) -> Callable[[SalesCopilotState], dict[str, Any]]:
+def _bind_node(
+    node: Callable[..., dict[str, Any]],
+    *,
+    llm_client=None,
+    database_path=None,
+) -> Callable[[SalesCopilotState], dict[str, Any]]:
     return partial(node, llm_client=llm_client, database_path=database_path)
 
 
-def build_sales_copilot_graph(*, llm_client, database_path) -> Any:
+def build_sales_copilot_graph(*, llm_client, database_path, mcp_client=None) -> Any:
     builder = StateGraph(SalesCopilotState)
 
     builder.add_node("ingest_files", _bind_node(ingest_files_node, llm_client=llm_client, database_path=database_path))
@@ -811,7 +848,10 @@ def build_sales_copilot_graph(*, llm_client, database_path) -> Any:
     builder.add_node("low_priority_nurture", _bind_node(low_priority_nurture_node, llm_client=llm_client, database_path=database_path))
     builder.add_node("standard_follow_up", _bind_node(standard_follow_up_node, llm_client=llm_client, database_path=database_path))
     builder.add_node("high_priority_follow_up", _bind_node(high_priority_follow_up_node, llm_client=llm_client, database_path=database_path))
-    builder.add_node("write_back_crm", _bind_node(write_back_crm_node, llm_client=llm_client, database_path=database_path))
+    builder.add_node(
+        "write_back_crm",
+        partial(write_back_crm_node, llm_client=llm_client, database_path=database_path, mcp_client=mcp_client),
+    )
     builder.add_node("generate_dashboard_output", _bind_node(generate_dashboard_output_node, llm_client=llm_client, database_path=database_path))
 
     builder.set_entry_point("ingest_files")

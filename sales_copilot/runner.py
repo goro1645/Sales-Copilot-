@@ -15,13 +15,21 @@ def run_sales_copilot(
     account_id: int | None = None,
     meeting_summary: dict[str, Any] | None = None,
     meeting_summary_provided: bool = False,
+    execution_mode: str = "direct",
+    mcp_client=None,
 ) -> dict[str, Any]:
     # 这里仅整理图所需状态；评测已拿到 parse 结果时可直接复用，避免重复请求模型。
-    graph = build_sales_copilot_graph(llm_client=llm_client, database_path=database_path)
+    if execution_mode not in {"direct", "mcp"}:
+        raise ValueError("execution_mode must be one of: direct, mcp")
+    if execution_mode == "mcp" and mcp_client is None:
+        raise ValueError("mcp mode requires an mcp_client")
+
+    graph = build_sales_copilot_graph(llm_client=llm_client, database_path=database_path, mcp_client=mcp_client)
     state: dict[str, Any] = {
         "customer_profile_raw": customer_profile_text,
         "meeting_note_raw": meeting_note_text,
         "workflow_log": [],
+        "execution_mode": execution_mode,
     }
     if account_id is not None:
         state["account_id"] = account_id

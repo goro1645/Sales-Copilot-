@@ -5,6 +5,7 @@ class SalesCopilotState(TypedDict, total=False):
     # 这些字段先把工作流骨架固定住，后续任务再逐步往里填真实业务数据。
     account_id: int
     meeting_id: int
+    execution_mode: str
     customer_profile_raw: str
     meeting_note_raw: str
     customer_profile_structured: dict[str, Any]

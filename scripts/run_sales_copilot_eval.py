@@ -9,18 +9,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from evals.sales_copilot.csds_runner import run_csds_parse_evaluation
 from evals.sales_copilot.reporting import write_report_bundle
 from evals.sales_copilot.runner import run_offline_evaluation
 from llm.deepseek_client import DeepSeekClient
 
 
-def _default_cases_path() -> Path:
+def _default_cases_path(dataset_kind: str) -> Path:
+    if dataset_kind == "csds":
+        return REPO_ROOT / "evals" / "sales_copilot" / "csds_cases.jsonl"
     return REPO_ROOT / "evals" / "sales_copilot" / "golden_cases.jsonl"
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Sales Copilot offline evaluation.")
-    parser.add_argument("--cases", default=str(_default_cases_path()))
+    parser.add_argument("--dataset-kind", choices=["golden", "csds"], default="golden")
+    parser.add_argument("--cases", default=None)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--mode", choices=["offline"], default="offline")
     parser.add_argument("--execution-mode", choices=["direct", "mcp"], default="direct")
@@ -34,18 +38,26 @@ def main() -> int:
     api_key = os.getenv("DEEPSEEK_API_KEY", "")
     if not api_key:
         raise SystemExit("Missing DeepSeek API key. Set DEEPSEEK_API_KEY.")
+    cases_path = Path(args.cases) if args.cases else _default_cases_path(args.dataset_kind)
 
     llm_client = DeepSeekClient(
         api_key=api_key,
         base_url=args.api_base_url,
         model=args.api_model,
     )
-    bundle = run_offline_evaluation(
-        cases_path=args.cases,
-        output_dir=args.output_dir,
-        llm_client=llm_client,
-        execution_mode=args.execution_mode,
-    )
+    if args.dataset_kind == "csds":
+        bundle = run_csds_parse_evaluation(
+            cases_path=cases_path,
+            output_dir=args.output_dir,
+            llm_client=llm_client,
+        )
+    else:
+        bundle = run_offline_evaluation(
+            cases_path=cases_path,
+            output_dir=args.output_dir,
+            llm_client=llm_client,
+            execution_mode=args.execution_mode,
+        )
     report_dir = Path(write_report_bundle(bundle, args.output_dir))
 
     print(f"Evaluated {bundle['summary']['total_cases']} cases.")

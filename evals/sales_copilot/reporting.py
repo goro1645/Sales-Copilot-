@@ -62,6 +62,7 @@ def _build_report_markdown(bundle: dict[str, Any]) -> str:
     summary = bundle.get("summary", {})
     parse_summary = summary.get("parse", {})
     workflow_summary = summary.get("workflow", {})
+    report_kind = str(bundle.get("report_kind", "full"))
     case_results = bundle.get("case_results", [])
     segment_distribution = Counter(str(row.get("segment", "unknown")) for row in case_results)
     lines = [
@@ -103,26 +104,27 @@ def _build_report_markdown(bundle: dict[str, Any]) -> str:
         for key, value in field_exact_match_rate.items():
             lines.append(f"| field_exact_match_rate.{key} | {value} |")
 
-    lines.extend(
-        [
-            "",
-            "## Workflow Metrics",
-            "",
-            "| metric | value |",
-            "| --- | --- |",
-        ]
-    )
-    for key in (
-        "workflow_success_rate",
-        "route_accuracy",
-        "priority_accuracy",
-        "stage_accuracy",
-        "score_range_accuracy",
-        "crm_writeback_accuracy",
-        "task_generation_hit_rate",
-        "required_task_hit_rate",
-    ):
-        lines.append(f"| {key} | {workflow_summary.get(key, 'N/A')} |")
+    if report_kind != "parse_only" and isinstance(workflow_summary, dict) and workflow_summary:
+        lines.extend(
+            [
+                "",
+                "## Workflow Metrics",
+                "",
+                "| metric | value |",
+                "| --- | --- |",
+            ]
+        )
+        for key in (
+            "workflow_success_rate",
+            "route_accuracy",
+            "priority_accuracy",
+            "stage_accuracy",
+            "score_range_accuracy",
+            "crm_writeback_accuracy",
+            "task_generation_hit_rate",
+            "required_task_hit_rate",
+        ):
+            lines.append(f"| {key} | {workflow_summary.get(key, 'N/A')} |")
 
     lines.extend(
         [

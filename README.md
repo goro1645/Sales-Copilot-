@@ -2055,6 +2055,7 @@ Use `scripts/run_sales_copilot_eval.py` to run the offline benchmark for regress
 
 ```powershell
 & 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\run_sales_copilot_eval.py' `
+  --dataset-kind golden `
   --cases 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\golden_cases.jsonl' `
   --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs' `
   --mode offline
@@ -2064,6 +2065,7 @@ Run the same offline benchmark in MCP mode:
 
 ```powershell
 & 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\run_sales_copilot_eval.py' `
+  --dataset-kind golden `
   --cases 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\golden_cases.jsonl' `
   --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs' `
   --mode offline `
@@ -2080,6 +2082,33 @@ Recommended local metrics for honest project reporting:
 - `task_generation_hit_rate`
 - `required_task_hit_rate`
 - `mcp tool success rate`
+
+### Public Real Customer-Service Corpus Subset
+
+For a more realistic parse benchmark, the repo also includes a small CSDS-based subset at `evals/sales_copilot/csds_cases.jsonl`.
+
+- Source corpus: `CSDS`
+- Source type: public real Chinese customer-service dialogues
+- Adapter method: lightweight customer profile context + official `FinalSumm` adapted into parse-only evaluation inputs
+- Scope: `parse-only`
+- Honest phrasing for writeups: `based on a public real customer-service dialogue corpus and a self-built gold workflow set`
+
+Example command:
+
+```powershell
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\run_sales_copilot_eval.py' `
+  --dataset-kind csds `
+  --cases 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\csds_cases.jsonl' `
+  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds' `
+  --mode offline
+```
+
+Use the CSDS subset to report structure-focused metrics such as:
+
+- `json_valid_rate`
+- `field_exact_match_rate.account_name`
+- `average_list_field_f1`
+- `risk_flag_recall`
 
 ### Public Real Meeting Corpus Subset
 

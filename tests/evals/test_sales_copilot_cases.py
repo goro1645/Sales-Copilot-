@@ -258,16 +258,16 @@ def test_load_golden_cases_raises_when_standard_route_has_no_score_overlap(tmp_p
         json.dumps(
             _build_sales_case(
                 "no_overlap_standard",
-                segment="high_intent_complete",
+                segment="high_intent_missing_facts",
                 lead_score_range=[81, 90],
                 lead_priority="high",
-                opportunity_stage="proposal",
+                opportunity_stage="qualification",
                 expected_route="standard_follow_up",
                 should_write_crm=True,
                 should_generate_tasks=True,
-                required_task_titles=["send proposal"],
-                required_risk_flags=[],
-                next_steps=["send proposal"],
+                required_task_titles=["Confirm budget range"],
+                required_risk_flags=["missing_required_facts"],
+                next_steps=[],
             )
         ),
         encoding="utf-8",
@@ -293,6 +293,83 @@ def test_load_golden_cases_raises_when_route_spillover_is_too_wide(tmp_path):
                 required_task_titles=["Clarify qualification gaps"],
                 required_risk_flags=["missing_required_facts"],
                 next_steps=["Clarify qualification gaps"],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="overlap"):
+        load_golden_cases(path)
+
+
+def test_load_golden_cases_allows_spillover_of_three_points(tmp_path):
+    path = tmp_path / "spillover_three.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "spillover_three",
+                segment="high_intent_missing_facts",
+                lead_score_range=[50, 82],
+                lead_priority="high",
+                opportunity_stage="qualification",
+                expected_route="standard_follow_up",
+                should_write_crm=True,
+                should_generate_tasks=True,
+                required_task_titles=["Confirm budget range"],
+                required_risk_flags=["missing_required_facts"],
+                next_steps=[],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    cases = load_golden_cases(path)
+
+    assert cases[0]["expected_workflow"]["lead_score_range"] == [50, 82]
+
+
+def test_load_golden_cases_allows_two_sided_spillover_within_limit(tmp_path):
+    path = tmp_path / "spillover_two_sided.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "spillover_two_sided",
+                segment="high_intent_missing_facts",
+                lead_score_range=[49, 81],
+                lead_priority="high",
+                opportunity_stage="qualification",
+                expected_route="standard_follow_up",
+                should_write_crm=True,
+                should_generate_tasks=True,
+                required_task_titles=["Confirm budget range"],
+                required_risk_flags=["missing_required_facts"],
+                next_steps=[],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    cases = load_golden_cases(path)
+
+    assert cases[0]["expected_workflow"]["lead_score_range"] == [49, 81]
+
+
+def test_load_golden_cases_raises_when_spillover_exceeds_three_points(tmp_path):
+    path = tmp_path / "spillover_four.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "spillover_four",
+                segment="high_intent_missing_facts",
+                lead_score_range=[50, 83],
+                lead_priority="high",
+                opportunity_stage="qualification",
+                expected_route="standard_follow_up",
+                should_write_crm=True,
+                should_generate_tasks=True,
+                required_task_titles=["Confirm budget range"],
+                required_risk_flags=["missing_required_facts"],
+                next_steps=[],
             )
         ),
         encoding="utf-8",

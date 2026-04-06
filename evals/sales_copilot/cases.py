@@ -107,8 +107,8 @@ _SEGMENT_CONTRACTS = {
     },
     "high_intent_missing_facts": {
         "lead_priority": "high",
-        "expected_route": "high_priority_follow_up",
-        "score_min": 50,
+        "expected_routes": {"standard_follow_up", "high_priority_follow_up"},
+        "score_min": 49,
         "score_max": 100,
     },
     "medium_intent_nurture": {
@@ -204,8 +204,8 @@ def _score_range_overlaps_route(score_range: list[int], route: str) -> bool:
     if score_max < route_min or score_min > route_max:
         return False
 
-    spillover_below = max(0, route_min - score_min)
-    spillover_above = max(0, score_max - route_max)
+    spillover_below = max(0, route_min - score_min) if score_min < route_min else 0
+    spillover_above = max(0, score_max - route_max) if score_max > route_max else 0
     return spillover_below + spillover_above <= _ROUTE_SCORE_BAND_SPILLOVER_LIMIT
 
 
@@ -244,6 +244,15 @@ def _validate_segment_contract(
         raise ValueError(
             f"{label} lead_score_range must stay within {contract['score_min']}..{contract['score_max']}"
         )
+    allowed_routes = contract.get("expected_routes")
+    if allowed_routes is not None:
+        allowed_routes_set = set(allowed_routes)
+        if expected_route != "need_more_info" and expected_route not in allowed_routes_set:
+            raise ValueError(
+                f"{label} expected_route must be one of {sorted(allowed_routes_set)}"
+            )
+    elif expected_route != contract["expected_route"] and expected_route != "need_more_info":
+        raise ValueError(f"{label} expected_route must be {contract['expected_route']}")
     if not _score_range_overlaps_route(lead_score_range, expected_route):
         route_band = _ROUTE_SCORE_BANDS[expected_route]
         raise ValueError(

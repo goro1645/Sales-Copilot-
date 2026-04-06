@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from evals.sales_copilot.reporting import write_report_bundle
@@ -51,6 +52,17 @@ class FakeLLM:
                 ensure_ascii=False,
             )
         raise AssertionError(f"Unexpected prompt: {prompt_text}")
+
+
+class CountingParseLLM(FakeLLM):
+    def __init__(self) -> None:
+        self.parse_calls = 0
+
+    def complete(self, messages, response_format=None):
+        prompt_text = "\n".join(message["content"] for message in messages)
+        if "Parse the meeting notes" in prompt_text:
+            self.parse_calls += 1
+        return super().complete(messages, response_format=response_format)
 
 
 class ParseCrashLLM(FakeLLM):
@@ -148,6 +160,22 @@ def test_run_offline_evaluation_returns_case_results_and_summary(tmp_path: Path)
     assert list_knowledge_chunks(bundle["case_results"][0]["database_path"])
 
 
+def test_run_offline_evaluation_reuses_single_parse_result_for_workflow(tmp_path: Path):
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(json.dumps(_build_case("case-1"), ensure_ascii=False) + "\n", encoding="utf-8")
+    llm = CountingParseLLM()
+
+    bundle = run_offline_evaluation(
+        cases_path=cases_path,
+        output_dir=tmp_path / "outputs",
+        llm_client=llm,
+    )
+
+    assert llm.parse_calls == 1
+    assert bundle["case_results"][0]["parse_result"]["account_name"] == "Acme Robotics"
+    assert bundle["case_results"][0]["workflow_result"]["dashboard_output"]["account_name"] == "Acme Robotics"
+
+
 def test_run_offline_evaluation_keeps_failing_case_in_summary_and_report(tmp_path: Path):
     cases_path = tmp_path / "cases.jsonl"
     cases_path.write_text(
@@ -223,6 +251,67 @@ def test_write_report_bundle_marks_parse_metric_failures_even_when_json_is_valid
     assert "account name mismatch" in report_markdown.lower()
 
 
+def test_write_report_bundle_does_not_flag_missing_tasks_when_not_applicable(tmp_path: Path):
+    bundle = {
+        "summary": {
+            "total_cases": 1,
+            "parse": {
+                "json_valid_rate": 1.0,
+                "list_field_precision": 1.0,
+                "list_field_recall": 1.0,
+                "list_field_f1": 1.0,
+                "average_list_field_f1": 1.0,
+                "risk_flag_recall": 0.0,
+                "field_exact_match_rate": {"account_name": 1.0},
+            },
+            "workflow": {
+                "workflow_success_rate": 1.0,
+                "route_accuracy": 1.0,
+                "priority_accuracy": 1.0,
+                "stage_accuracy": 1.0,
+                "score_range_accuracy": 1.0,
+                "crm_writeback_accuracy": 1.0,
+                "task_generation_hit_rate": 1.0,
+                "required_task_hit_rate": 0.0,
+            },
+        },
+        "case_results": [
+            {
+                "case_id": "case-no-task",
+                "segment": "low_intent_or_noise",
+                "parse_metrics": {
+                    "json_valid": True,
+                    "field_exact_match": {"account_name": True},
+                    "list_field_precision": {},
+                    "list_field_recall": {},
+                    "list_field_f1": {},
+                    "list_field_applicable": {},
+                    "risk_flag_recall": 0.0,
+                    "risk_flag_applicable": False,
+                },
+                "workflow_metrics": {
+                    "workflow_success": True,
+                    "route_correct": True,
+                    "priority_correct": True,
+                    "stage_correct": True,
+                    "score_in_range": True,
+                    "crm_writeback_correct": True,
+                    "task_generation_correct": True,
+                    "required_task_hit_rate": 0.0,
+                    "required_task_applicable": False,
+                },
+            }
+        ],
+    }
+
+    report_dir = Path(write_report_bundle(bundle, tmp_path / "report"))
+    report_markdown = (report_dir / "report.md").read_text(encoding="utf-8")
+
+    assert "case-no-task" not in report_markdown
+    assert "required tasks missing" not in report_markdown.lower()
+    assert "- None" in report_markdown
+
+
 def test_write_report_bundle_writes_json_md_and_jsonl(tmp_path: Path):
     bundle = {
         "summary": {
@@ -277,7 +366,7 @@ def test_run_sales_copilot_eval_cli_help_works_from_repo_root():
     repo_root = Path(__file__).resolve().parents[2]
     script_path = repo_root / "scripts" / "run_sales_copilot_eval.py"
     completed = subprocess.run(
-        ["D:\\anaconda\\envs\\minimind_job_agent\\python.exe", str(script_path), "--help"],
+        [sys.executable, str(script_path), "--help"],
         cwd=repo_root,
         capture_output=True,
         text=True,

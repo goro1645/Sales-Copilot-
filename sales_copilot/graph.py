@@ -365,7 +365,7 @@ def ingest_files_node(state: SalesCopilotState, *, llm_client=None, database_pat
 def parse_meeting_note_node(state: SalesCopilotState, *, llm_client, database_path=None) -> dict[str, Any]:
     del database_path
     existing_summary = state.get("meeting_summary")
-    if existing_summary and not state.get("meeting_note_raw"):
+    if isinstance(existing_summary, dict) and existing_summary:
         return _step_result(state, "parse_meeting_note", {"meeting_summary": existing_summary})
     messages = build_meeting_parse_messages(
         customer_profile_text=state.get("customer_profile_raw", ""),

@@ -2031,7 +2031,7 @@ $env:DEEPSEEK_API_KEY="your-key"
 Targeted verification:
 
 ```powershell
-& 'D:\anaconda\envs\minimind_job_agent\python.exe' -m pytest tests/sales_copilot tests/llm/test_deepseek_client.py tests/scripts/test_sales_copilot_web_utils.py -q -p no:debugging
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' -m pytest tests/evals tests/sales_copilot tests/llm/test_deepseek_client.py tests/scripts/test_sales_copilot_web_utils.py -q
 ```
 
 Architecture notes:
@@ -2042,16 +2042,15 @@ Architecture notes:
 
 ### Sales Copilot Offline Evaluation
 
-Use `scripts/run_sales_copilot_eval.py` to run the offline benchmark against a case file and write results to an output directory:
+Use `scripts/run_sales_copilot_eval.py` to run the offline benchmark for regression tracking and resume-safe project writeups:
 
 ```powershell
-$env:DEEPSEEK_API_KEY="your-key"
-& 'D:\anaconda\envs\minimind_job_agent\python.exe' scripts/run_sales_copilot_eval.py `
-  --cases evals/sales_copilot/golden_cases.jsonl `
-  --output-dir outputs/sales_copilot_eval `
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\run_sales_copilot_eval.py' `
+  --cases 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\golden_cases.jsonl' `
+  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs' `
   --mode offline
 ```
 
-The command writes `report.json`, `report.md`, and `case_results.jsonl` under the output directory. On this Windows setup, `pytest` may need `-p no:debugging` to avoid a local `pyreadline3/WMI` hang.
+The command writes `report.json`, `report.md`, and `case_results.jsonl` under the output directory.
 
 

@@ -365,9 +365,7 @@ def ingest_files_node(state: SalesCopilotState, *, llm_client=None, database_pat
 def parse_meeting_note_node(state: SalesCopilotState, *, llm_client, database_path=None) -> dict[str, Any]:
     del database_path
     existing_summary = state.get("meeting_summary")
-    # Allow callers and tests to seed an already-parsed summary so later nodes
-    # can be exercised without forcing another LLM parse.
-    if state.get("meeting_summary_provided") or (isinstance(existing_summary, dict) and existing_summary):
+    if state.get("meeting_summary_provided"):
         return _step_result(state, "parse_meeting_note", {"meeting_summary": existing_summary})
     messages = build_meeting_parse_messages(
         customer_profile_text=state.get("customer_profile_raw", ""),

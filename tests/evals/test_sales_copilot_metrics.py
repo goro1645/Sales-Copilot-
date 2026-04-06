@@ -229,3 +229,52 @@ def test_summarize_parse_metrics_ignores_empty_list_fields_in_average():
     summary = summarize_parse_metrics(rows)
 
     assert summary["average_list_field_f1"] == 0.0
+
+
+def test_summarize_parse_metrics_includes_invalid_rows_when_gold_fields_are_applicable():
+    case = {
+        "expected_parse": {
+            "account_name": "BluePeak Health",
+            "customer_roles": ["CIO"],
+            "confirmed_needs": [],
+            "budget_signals": [],
+            "timeline_signals": [],
+            "next_steps": [],
+            "competitors": [],
+        },
+        "expected_workflow": {"required_risk_flags": ["missing_required_facts"]},
+    }
+    valid_actual_parse = {
+        "account_name": "BluePeak Health",
+        "customer_roles": ["CIO"],
+        "confirmed_needs": [],
+        "budget_signals": [],
+        "timeline_signals": [],
+        "next_steps": [],
+        "competitors": [],
+        "risk_flags": ["missing_required_facts"],
+    }
+    malformed_actual_parse = {
+        "account_name": "BluePeak Health",
+        "customer_roles": "CIO",
+        "confirmed_needs": [],
+        "budget_signals": [],
+        "timeline_signals": [],
+        "next_steps": [],
+        "competitors": [],
+        "risk_flags": [],
+    }
+
+    valid_row = evaluate_parse_case(case, valid_actual_parse)
+    malformed_row = evaluate_parse_case(case, malformed_actual_parse)
+
+    assert valid_row["json_valid"] is True
+    assert malformed_row["json_valid"] is False
+    assert malformed_row["list_field_applicable"]["customer_roles"] is True
+    assert malformed_row["risk_flag_applicable"] is True
+
+    summary = summarize_parse_metrics([valid_row, malformed_row])
+
+    assert summary["json_valid_rate"] == 0.5
+    assert summary["average_list_field_f1"] == 0.5
+    assert summary["risk_flag_recall"] == 0.5

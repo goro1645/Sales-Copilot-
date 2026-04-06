@@ -65,6 +65,32 @@ def _required_risk_flags(case: dict[str, Any]) -> list[str]:
     return _normalize_list(expected_workflow.get("required_risk_flags", []))
 
 
+def _gold_list_field_applicability(expected_parse: dict[str, Any]) -> dict[str, bool]:
+    return {field: bool(_normalize_list(expected_parse.get(field, []))) for field in LIST_FIELDS}
+
+
+def _gold_risk_flag_applicability(case: dict[str, Any]) -> bool:
+    return bool(_required_risk_flags(case))
+
+
+def _invalid_parse_metrics(case: dict[str, Any]) -> dict[str, Any]:
+    expected_parse = case.get("expected_parse", {})
+    if not isinstance(expected_parse, dict):
+        expected_parse = {}
+
+    # 解析无效时，仍按 gold 是否要求该字段来计入平均，避免 0 分样本被分母漏掉。
+    return {
+        "json_valid": False,
+        "field_exact_match": {field: 0.0 for field in SCALAR_FIELDS},
+        "list_field_precision": {field: 0.0 for field in LIST_FIELDS},
+        "list_field_recall": {field: 0.0 for field in LIST_FIELDS},
+        "list_field_f1": {field: 0.0 for field in LIST_FIELDS},
+        "list_field_applicable": _gold_list_field_applicability(expected_parse),
+        "risk_flag_recall": 0.0,
+        "risk_flag_applicable": _gold_risk_flag_applicability(case),
+    }
+
+
 def _is_valid_actual_parse(actual_parse: dict[str, Any]) -> bool:
     if not isinstance(actual_parse.get("account_name"), str):
         return False
@@ -82,28 +108,10 @@ def evaluate_parse_case(case: dict[str, Any], actual_parse: Any) -> dict[str, An
         expected_parse = {}
 
     if not isinstance(actual_parse, dict):
-        return {
-            "json_valid": False,
-            "field_exact_match": {field: 0.0 for field in SCALAR_FIELDS},
-            "list_field_precision": {field: 0.0 for field in LIST_FIELDS},
-            "list_field_recall": {field: 0.0 for field in LIST_FIELDS},
-            "list_field_f1": {field: 0.0 for field in LIST_FIELDS},
-            "list_field_applicable": {field: False for field in LIST_FIELDS},
-            "risk_flag_recall": 0.0,
-            "risk_flag_applicable": False,
-        }
+        return _invalid_parse_metrics(case)
 
     if not _is_valid_actual_parse(actual_parse):
-        return {
-            "json_valid": False,
-            "field_exact_match": {field: 0.0 for field in SCALAR_FIELDS},
-            "list_field_precision": {field: 0.0 for field in LIST_FIELDS},
-            "list_field_recall": {field: 0.0 for field in LIST_FIELDS},
-            "list_field_f1": {field: 0.0 for field in LIST_FIELDS},
-            "list_field_applicable": {field: False for field in LIST_FIELDS},
-            "risk_flag_recall": 0.0,
-            "risk_flag_applicable": False,
-        }
+        return _invalid_parse_metrics(case)
 
     field_exact_match = {
         "account_name": expected_parse.get("account_name") == actual_parse.get("account_name")

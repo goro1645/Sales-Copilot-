@@ -6,6 +6,7 @@ from sales_copilot.storage import (
     get_account_by_id,
     list_tasks,
     save_task_record,
+    update_task_record,
     update_account_stage_and_status,
 )
 
@@ -39,16 +40,44 @@ class SalesCopilotMCPServer:
             return {"tasks": tasks}
 
         if tool_name == "create_task":
+            account_id = self._require_int(arguments, "account_id", tool_name)
+            meeting_id = self._require_int(arguments, "meeting_id", tool_name)
+            title = self._require_text(arguments, "title", tool_name)
+            description = self._require_text(arguments, "description", tool_name)
+            priority = self._require_text(arguments, "priority", tool_name)
+            due_at = self._require_text(arguments, "due_at", tool_name)
+            status = str(arguments.get("status", "open"))
+
+            if status == "open":
+                for task in list_tasks(self.db_path):
+                    if (
+                        task["account_id"] == account_id
+                        and task["meeting_id"] == meeting_id
+                        and task["title"] == title
+                        and task["status"] == "open"
+                    ):
+                        update_task_record(
+                            self.db_path,
+                            task_id=task["id"],
+                            record={
+                                "description": description,
+                                "priority": priority,
+                                "due_at": due_at,
+                                "status": status,
+                            },
+                        )
+                        return {"task_id": task["id"]}
+
             task_id = save_task_record(
                 self.db_path,
                 {
-                    "account_id": self._require_int(arguments, "account_id", tool_name),
-                    "meeting_id": self._require_int(arguments, "meeting_id", tool_name),
-                    "title": self._require_text(arguments, "title", tool_name),
-                    "description": self._require_text(arguments, "description", tool_name),
-                    "priority": self._require_text(arguments, "priority", tool_name),
-                    "due_at": self._require_text(arguments, "due_at", tool_name),
-                    "status": str(arguments.get("status", "open")),
+                    "account_id": account_id,
+                    "meeting_id": meeting_id,
+                    "title": title,
+                    "description": description,
+                    "priority": priority,
+                    "due_at": due_at,
+                    "status": status,
                 },
             )
             return {"task_id": task_id}

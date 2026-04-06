@@ -464,6 +464,41 @@ def test_run_sales_copilot_refreshes_existing_meeting_and_task_records(tmp_path:
     assert memory_row["recommended_next_step"] == "Send updated proposal"
 
 
+def test_run_sales_copilot_mcp_mode_refreshes_existing_task_records(tmp_path: Path):
+    db_path = tmp_path / "sales.db"
+    mcp_client = RecordingMCPClient(SalesCopilotMCPClient(SalesCopilotMCPServer(db_path)))
+    llm = RefreshingLLM()
+
+    first = run_sales_copilot(
+        customer_profile_text="Acme Robotics is a manufacturing company.",
+        meeting_note_text="CTO requested a proposal for private deployment.",
+        database_path=db_path,
+        llm_client=llm,
+        execution_mode="mcp",
+        mcp_client=mcp_client,
+    )
+    second = run_sales_copilot(
+        customer_profile_text="Acme Robotics is a manufacturing company.",
+        meeting_note_text="CTO requested a proposal for private deployment.",
+        database_path=db_path,
+        llm_client=llm,
+        account_id=first["account_id"],
+        execution_mode="mcp",
+        mcp_client=mcp_client,
+    )
+
+    meeting_rows = list_meeting_records(db_path)
+    task_rows = list_tasks(db_path)
+
+    assert first["account_id"] == second["account_id"]
+    assert len(meeting_rows) == 1
+    assert len(task_rows) == 1
+    assert task_rows[0]["due_at"] == "2026-04-04"
+    assert task_rows[0]["description"] == "Send revised proposal"
+    assert task_rows[0]["priority"] == "medium"
+    assert [tool_name for tool_name, _arguments in mcp_client.calls].count("create_task") == 2
+
+
 def test_run_sales_copilot_accepts_common_scoring_alias_fields(tmp_path: Path):
     class AliasScoringLLM(FakeLLM):
         def complete(self, messages, response_format=None):

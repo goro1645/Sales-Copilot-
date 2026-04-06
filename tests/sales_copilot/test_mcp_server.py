@@ -143,6 +143,57 @@ def test_mcp_server_create_task_persists_task(tmp_path: Path):
     assert tasks[0]["description"] == "Book the technical workshop"
 
 
+def test_mcp_server_create_task_refreshes_existing_open_task(tmp_path: Path):
+    from sales_copilot.mcp_server import SalesCopilotMCPServer
+
+    db_path = tmp_path / "sales.db"
+    account_id = save_account(db_path, _build_account_record("Litware"))
+    meeting_id = save_meeting_record(
+        db_path,
+        {
+            "account_id": account_id,
+            "meeting_title": "Litware Review",
+            "meeting_note_raw": "Review call.",
+            "meeting_summary_json": "{}",
+            "lead_score": 68,
+            "priority": "medium",
+        },
+    )
+    server = SalesCopilotMCPServer(db_path)
+    first = server.call_tool(
+        "create_task",
+        {
+            "account_id": account_id,
+            "meeting_id": meeting_id,
+            "title": "Send proposal",
+            "description": "Send first proposal",
+            "priority": "high",
+            "due_at": "2026-04-03",
+            "status": "open",
+        },
+    )
+
+    second = server.call_tool(
+        "create_task",
+        {
+            "account_id": account_id,
+            "meeting_id": meeting_id,
+            "title": "Send proposal",
+            "description": "Send revised proposal",
+            "priority": "medium",
+            "due_at": "2026-04-04",
+            "status": "open",
+        },
+    )
+
+    tasks = list_tasks(db_path)
+    assert first["task_id"] == second["task_id"]
+    assert len(tasks) == 1
+    assert tasks[0]["description"] == "Send revised proposal"
+    assert tasks[0]["priority"] == "medium"
+    assert tasks[0]["due_at"] == "2026-04-04"
+
+
 def test_mcp_server_update_account_stage_updates_account(tmp_path: Path):
     from sales_copilot.mcp_server import SalesCopilotMCPServer
 

@@ -53,6 +53,34 @@ class FakeLLM:
         raise AssertionError(f"Unexpected prompt: {prompt_text}")
 
 
+class ParseCrashLLM(FakeLLM):
+    def complete(self, messages, response_format=None):
+        prompt_text = "\n".join(message["content"] for message in messages)
+        if "Parse the meeting notes" in prompt_text:
+            raise RuntimeError("parse crashed")
+        return super().complete(messages, response_format=response_format)
+
+
+class ParseMismatchLLM(FakeLLM):
+    def complete(self, messages, response_format=None):
+        prompt_text = "\n".join(message["content"] for message in messages)
+        if "Parse the meeting notes" in prompt_text:
+            return json.dumps(
+                {
+                    "account_name": "Wrong Account",
+                    "customer_roles": [],
+                    "confirmed_needs": [],
+                    "budget_signals": [],
+                    "timeline_signals": [],
+                    "next_steps": [],
+                    "competitors": [],
+                    "risk_flags": [],
+                },
+                ensure_ascii=False,
+            )
+        return super().complete(messages, response_format=response_format)
+
+
 def _build_case(case_id: str) -> dict[str, object]:
     return {
         "case_id": case_id,
@@ -151,6 +179,48 @@ def test_run_offline_evaluation_keeps_failing_case_in_summary_and_report(tmp_pat
     assert "stage mismatch" in report_markdown.lower()
     assert "crm writeback mismatch" in report_markdown.lower()
     assert "task generation mismatch" in report_markdown.lower()
+
+
+def test_run_offline_evaluation_keeps_exception_case_in_results_and_report(tmp_path: Path):
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(json.dumps(_build_case("case-error"), ensure_ascii=False) + "\n", encoding="utf-8")
+
+    bundle = run_offline_evaluation(
+        cases_path=cases_path,
+        output_dir=tmp_path / "outputs",
+        llm_client=ParseCrashLLM(),
+    )
+    report_dir = Path(write_report_bundle(bundle, tmp_path / "report"))
+    report_markdown = (report_dir / "report.md").read_text(encoding="utf-8")
+
+    assert bundle["summary"]["total_cases"] == 1
+    assert len(bundle["case_results"]) == 1
+    assert bundle["case_results"][0]["case_id"] == "case-error"
+    assert bundle["case_results"][0]["error"]
+    assert bundle["case_results"][0]["workflow_metrics"]["workflow_success"] is False
+    assert bundle["summary"]["workflow"]["workflow_success_rate"] == 0.0
+    assert "case-error" in report_markdown
+    assert "case execution error" in report_markdown.lower()
+
+
+def test_write_report_bundle_marks_parse_metric_failures_even_when_json_is_valid(tmp_path: Path):
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(json.dumps(_build_case("case-parse-miss"), ensure_ascii=False) + "\n", encoding="utf-8")
+
+    bundle = run_offline_evaluation(
+        cases_path=cases_path,
+        output_dir=tmp_path / "outputs",
+        llm_client=ParseMismatchLLM(),
+    )
+    report_dir = Path(write_report_bundle(bundle, tmp_path / "report"))
+    report_markdown = (report_dir / "report.md").read_text(encoding="utf-8")
+
+    assert bundle["case_results"][0]["parse_metrics"]["json_valid"] is True
+    assert bundle["case_results"][0]["parse_metrics"]["field_exact_match"]["account_name"] is False
+    assert "Top Failing Cases" in report_markdown
+    assert "- None" not in report_markdown
+    assert "case-parse-miss" in report_markdown
+    assert "account name mismatch" in report_markdown.lower()
 
 
 def test_write_report_bundle_writes_json_md_and_jsonl(tmp_path: Path):

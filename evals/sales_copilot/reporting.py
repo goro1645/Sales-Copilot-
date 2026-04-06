@@ -13,8 +13,27 @@ def _collect_failing_cases(case_results: list[dict[str, Any]]) -> list[dict[str,
         reasons: list[str] = []
         parse_metrics = row.get("parse_metrics", {})
         workflow_metrics = row.get("workflow_metrics", {})
+        if row.get("error"):
+            reasons.append("case execution error")
         if not parse_metrics.get("json_valid", False):
             reasons.append("parse json invalid")
+        field_exact_match = parse_metrics.get("field_exact_match", {})
+        if isinstance(field_exact_match, dict) and field_exact_match.get("account_name") in (0, False):
+            reasons.append("account name mismatch")
+        list_field_applicable = parse_metrics.get("list_field_applicable", {})
+        if isinstance(list_field_applicable, dict):
+            for metric_name in ("list_field_precision", "list_field_recall", "list_field_f1"):
+                metric_values = parse_metrics.get(metric_name, {})
+                if not isinstance(metric_values, dict):
+                    continue
+                if any(
+                    list_field_applicable.get(field, False) and float(metric_values.get(field, 0.0)) < 1.0
+                    for field in metric_values
+                ):
+                    reasons.append(f"{metric_name} below target")
+                    break
+        if parse_metrics.get("risk_flag_applicable", False) and float(parse_metrics.get("risk_flag_recall", 0.0)) < 1.0:
+            reasons.append("risk flags missing")
         if workflow_metrics.get("route_correct") is False:
             reasons.append("route mismatch")
         if workflow_metrics.get("priority_correct") is False:

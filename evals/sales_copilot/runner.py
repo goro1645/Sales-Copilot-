@@ -65,13 +65,26 @@ def _run_parse_step(case: GoldenCase, *, llm_client, database_path: Path) -> dic
 def _build_case_result(case: GoldenCase, *, output_dir: Path, llm_client) -> dict[str, Any]:
     database_path = _prepare_case_database(case["case_id"], output_dir)
     _seed_case_database(database_path)
-    parse_result = _run_parse_step(case, llm_client=llm_client, database_path=database_path)
-    workflow_result = run_sales_copilot(
-        customer_profile_text=case["customer_profile_text"],
-        meeting_note_text=case["meeting_note_text"],
-        database_path=database_path,
-        llm_client=llm_client,
-    )
+    errors: list[str] = []
+    parse_result: dict[str, Any] = {}
+    workflow_result: dict[str, Any] = {}
+
+    try:
+        parse_result = _run_parse_step(case, llm_client=llm_client, database_path=database_path)
+    except Exception as exc:
+        errors.append(f"parse error: {exc}")
+
+    if not errors:
+        try:
+            workflow_result = run_sales_copilot(
+                customer_profile_text=case["customer_profile_text"],
+                meeting_note_text=case["meeting_note_text"],
+                database_path=database_path,
+                llm_client=llm_client,
+            )
+        except Exception as exc:
+            errors.append(f"workflow error: {exc}")
+
     return {
         "case_id": case["case_id"],
         "segment": case["segment"],
@@ -82,6 +95,8 @@ def _build_case_result(case: GoldenCase, *, output_dir: Path, llm_client) -> dic
         "workflow_result": workflow_result,
         "parse_metrics": evaluate_parse_case(case, parse_result),
         "workflow_metrics": evaluate_workflow_case(case, workflow_result),
+        "errors": errors,
+        "error": "; ".join(errors),
     }
 
 
@@ -90,10 +105,9 @@ def run_offline_evaluation(cases_path, output_dir, llm_client) -> dict[str, Any]
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
 
-    case_results = [
-        _build_case_result(case, output_dir=output_root, llm_client=llm_client)
-        for case in load_golden_cases(cases_file)
-    ]
+    case_results = []
+    for case in load_golden_cases(cases_file):
+        case_results.append(_build_case_result(case, output_dir=output_root, llm_client=llm_client))
     return {
         "cases_path": str(cases_file),
         "output_dir": str(output_root),

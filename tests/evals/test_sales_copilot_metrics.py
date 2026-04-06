@@ -41,6 +41,38 @@ def test_evaluate_parse_case_scores_scalar_and_list_fields():
     assert metrics["risk_flag_recall"] == 1.0
 
 
+def test_evaluate_parse_case_allows_loose_list_value_matching():
+    case = {
+        "expected_parse": {
+            "account_name": "GSSi, Inc.",
+            "customer_roles": ["Councilmember"],
+            "confirmed_needs": ["contract extension"],
+            "budget_signals": ["not to exceed 999900"],
+            "timeline_signals": ["hold to next meeting"],
+            "next_steps": ["review pricing assumptions"],
+            "competitors": [],
+        },
+        "expected_workflow": {"required_risk_flags": []},
+    }
+    actual_parse = {
+        "account_name": "GSSi, Inc.",
+        "customer_roles": ["council member"],
+        "confirmed_needs": ["extend contract term to March 9, 2020"],
+        "budget_signals": ["revised total not to exceed $999,900"],
+        "timeline_signals": ["move item back one week"],
+        "next_steps": ["prepare detailed pricing review"],
+        "competitors": [],
+        "risk_flags": [],
+    }
+
+    metrics = evaluate_parse_case(case, actual_parse)
+
+    assert metrics["list_field_f1"]["customer_roles"] == 1.0
+    assert metrics["list_field_f1"]["budget_signals"] == 1.0
+    assert metrics["list_field_f1"]["timeline_signals"] == 1.0
+    assert metrics["list_field_f1"]["next_steps"] == 1.0
+
+
 def test_evaluate_parse_case_treats_non_exact_account_name_as_mismatch():
     case = {
         "expected_parse": {
@@ -484,4 +516,77 @@ def test_evaluate_workflow_case_allows_loose_required_task_title_matching():
 
     metrics = evaluate_workflow_case(case, actual_result)
 
+    assert metrics["required_task_hit_rate"] == 1.0
+
+
+def test_evaluate_workflow_case_uses_explicit_mcp_writeback_flag_and_nested_actions():
+    case = {
+        "expected_workflow": {
+            "lead_score_range": [80, 95],
+            "lead_priority": "high",
+            "opportunity_stage": "proposal",
+            "expected_route": "high_priority_follow_up",
+            "should_write_crm": True,
+            "should_generate_tasks": True,
+            "required_task_titles": ["execute contract documents"],
+            "required_risk_flags": [],
+        }
+    }
+    actual_result = {
+        "execution_mode": "mcp",
+        "workflow_log": ["high_priority_follow_up", "write_back_crm"],
+        "lead_score": 88,
+        "lead_priority": "high",
+        "opportunity_stage": "proposal",
+        "crm_update_ids": [],
+        "crm_writeback_performed": True,
+        "task_payload": [],
+        "follow_up_plan": {
+            "follow_up_plan": {
+                "next_actions": [
+                    {"action": "Authorize City Manager to execute contract documents"}
+                ]
+            }
+        },
+    }
+
+    metrics = evaluate_workflow_case(case, actual_result)
+
+    assert metrics["crm_writeback_correct"] is True
+    assert metrics["task_generation_correct"] is True
+    assert metrics["required_task_hit_rate"] == 1.0
+
+
+def test_evaluate_workflow_case_merges_task_payload_and_follow_up_actions():
+    case = {
+        "expected_workflow": {
+            "lead_score_range": [50, 79],
+            "lead_priority": "medium",
+            "opportunity_stage": "qualification",
+            "expected_route": "standard_follow_up",
+            "should_write_crm": True,
+            "should_generate_tasks": True,
+            "required_task_titles": ["pricing review"],
+            "required_risk_flags": [],
+        }
+    }
+    actual_result = {
+        "workflow_log": ["standard_follow_up", "write_back_crm"],
+        "lead_score": 65,
+        "lead_priority": "medium",
+        "opportunity_stage": "qualification",
+        "crm_writeback_performed": True,
+        "task_payload": [{"title": "Clarify qualification gaps"}],
+        "follow_up_plan": {
+            "follow_up_plan": {
+                "next_actions": [
+                    {"action": "Prepare and send detailed pricing breakdown"}
+                ]
+            }
+        },
+    }
+
+    metrics = evaluate_workflow_case(case, actual_result)
+
+    assert metrics["task_generation_correct"] is True
     assert metrics["required_task_hit_rate"] == 1.0

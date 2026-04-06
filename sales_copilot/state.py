@@ -21,6 +21,7 @@ class SalesCopilotState(TypedDict, total=False):
     follow_up_plan: dict[str, Any]
     crm_update_payload: dict[str, Any]
     crm_update_ids: list[int]
+    crm_writeback_performed: bool
     task_payload: list[dict[str, Any]]
     dashboard_output: dict[str, Any]
     workflow_log: list[str]

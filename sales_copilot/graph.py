@@ -582,7 +582,7 @@ def high_priority_follow_up_node(state: SalesCopilotState, *, llm_client, databa
 def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_path=None, mcp_client=None) -> dict[str, Any]:
     del llm_client
     if database_path is None:
-        return _step_result(state, "write_back_crm", {"crm_update_ids": []})
+        return _step_result(state, "write_back_crm", {"crm_update_ids": [], "crm_writeback_performed": False})
 
     execution_mode = str(state.get("execution_mode", "direct"))
     if execution_mode not in {"direct", "mcp"}:
@@ -759,6 +759,8 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
             "account_id": account_id,
             "meeting_id": meeting_id,
             "crm_update_ids": [crm_update_id] if crm_update_id is not None else [],
+            # direct / mcp 都统一写这个显式标记，评测层不再依赖 crm_update_ids 是否非空。
+            "crm_writeback_performed": True,
             "task_payload": task_payload,
             "task_ids": task_ids,
         },

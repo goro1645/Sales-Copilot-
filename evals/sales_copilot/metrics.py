@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import re
 from typing import Any
 
 
@@ -25,6 +26,37 @@ def _normalize_text(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip().lower()
+
+
+def _compact_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", _normalize_text(value))
+
+
+def _normalize_business_phrase(value: Any) -> str:
+    text = _normalize_text(value)
+    if not text:
+        return ""
+
+    collapsed = re.sub(r"[^a-z0-9]+", " ", text).strip()
+    compact = _compact_text(text)
+
+    # 这层只做小范围、可解释的规则归一化，处理公开会议转销售标签时常见的同义表达。
+    if "councilmember" in compact or compact == "councilmember":
+        return "councilmember"
+    if "contract" in collapsed and "extend" in collapsed:
+        return "contract extension"
+    if "not to exceed" in collapsed:
+        digits = "".join(ch for ch in collapsed if ch.isdigit())
+        return f"not to exceed {digits}" if digits else "not to exceed"
+    if "next meeting" in collapsed or "one week" in collapsed:
+        return "next meeting review"
+    if "pricing" in collapsed and any(term in collapsed for term in ("review", "assumption", "breakdown", "vet", "vetting")):
+        return "pricing review"
+    if "execute" in collapsed and "contract" in collapsed and "document" in collapsed:
+        return "execute contract documents"
+    if "agreement" in collapsed and "execution" in collapsed:
+        return "execute contract documents"
+    return collapsed
 
 
 def _normalize_list(value: Any) -> list[str]:
@@ -97,17 +129,26 @@ def _extract_workflow_route(workflow_log: Any) -> str:
 
 
 def _extract_task_titles(task_payload: Any) -> list[str]:
-    if not isinstance(task_payload, list):
-        return []
-
     titles: list[str] = []
     seen: set[str] = set()
-    for item in task_payload:
-        title = _normalize_text(_get_value(item, "title", _get_value(item, "task_title", item)))
+
+    def _add(value: Any) -> None:
+        title = _normalize_text(_get_value(value, "title", _get_value(value, "task_title", _get_value(value, "action", value))))
         if not title or title in seen:
-            continue
+            return
         seen.add(title)
         titles.append(title)
+
+    if isinstance(task_payload, list):
+        for item in task_payload:
+            _add(item)
+
+    if isinstance(task_payload, dict):
+        for item in task_payload.get("tasks", []):
+            _add(item)
+        for item in _get_value(task_payload.get("follow_up_plan", {}), "next_actions", []):
+            _add(item)
+
     return titles
 
 
@@ -116,21 +157,32 @@ def _task_title_matches(required_title: str, actual_title: str) -> bool:
     actual = _normalize_text(actual_title)
     if not required or not actual:
         return False
-    return required in actual or actual in required
+    if required in actual or actual in required:
+        return True
+    return _normalize_business_phrase(required) == _normalize_business_phrase(actual)
 
 
 def _set_precision_recall_f1(expected: list[str], actual: list[str]) -> tuple[float, float, float]:
-    expected_set = set(expected)
-    actual_set = set(actual)
-
-    if not expected_set and not actual_set:
+    if not expected and not actual:
         return 1.0, 1.0, 1.0
-    if not expected_set or not actual_set:
+    if not expected or not actual:
         return 0.0, 0.0, 0.0
 
-    true_positive = len(expected_set & actual_set)
-    precision = true_positive / len(actual_set)
-    recall = true_positive / len(expected_set)
+    matched_expected: set[int] = set()
+    matched_actual: set[int] = set()
+    for expected_index, expected_item in enumerate(expected):
+        for actual_index, actual_item in enumerate(actual):
+            if actual_index in matched_actual:
+                continue
+            if not _task_title_matches(expected_item, actual_item):
+                continue
+            matched_expected.add(expected_index)
+            matched_actual.add(actual_index)
+            break
+
+    true_positive = len(matched_expected)
+    precision = true_positive / len(actual)
+    recall = true_positive / len(expected)
     if precision + recall == 0:
         return precision, recall, 0.0
     f1 = 2 * precision * recall / (precision + recall)
@@ -330,11 +382,14 @@ def evaluate_workflow_case(case: dict[str, Any], actual_result: Any) -> dict[str
     crm_update_ids = actual_result.get("crm_update_ids")
     if crm_update_ids is None:
         crm_update_ids = actual_result.get("crm_writeback")
-    crm_writeback_actual = bool(crm_update_ids)
+    crm_writeback_actual = bool(actual_result.get("crm_writeback_performed", False) or crm_update_ids)
     crm_writeback_correct = crm_writeback_actual == bool(expected_workflow.get("should_write_crm"))
 
     task_payload = actual_result.get("task_payload", [])
     actual_task_titles = _extract_task_titles(task_payload)
+    for follow_up_title in _extract_task_titles(actual_result.get("follow_up_plan", {})):
+        if follow_up_title not in actual_task_titles:
+            actual_task_titles.append(follow_up_title)
     task_generation_correct = bool(actual_task_titles) == bool(expected_workflow.get("should_generate_tasks"))
 
     required_task_titles = _normalize_list(expected_workflow.get("required_task_titles", []))

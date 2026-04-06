@@ -82,6 +82,7 @@ def _build_case_result(case: GoldenCase, *, output_dir: Path, llm_client) -> dic
                 database_path=database_path,
                 llm_client=llm_client,
                 meeting_summary=parse_result,
+                meeting_summary_provided=True,
             )
         except Exception as exc:
             errors.append(f"workflow error: {exc}")

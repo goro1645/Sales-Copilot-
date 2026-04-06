@@ -9,6 +9,7 @@ class SalesCopilotState(TypedDict, total=False):
     meeting_note_raw: str
     customer_profile_structured: dict[str, Any]
     meeting_summary: dict[str, Any]
+    meeting_summary_provided: bool
     retrieved_docs: list[dict[str, Any]]
     account_memory: dict[str, Any]
     open_tasks: list[dict[str, Any]]

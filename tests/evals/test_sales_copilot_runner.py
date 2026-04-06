@@ -65,6 +65,15 @@ class CountingParseLLM(FakeLLM):
         return super().complete(messages, response_format=response_format)
 
 
+class EmptyParseLLM(CountingParseLLM):
+    def complete(self, messages, response_format=None):
+        prompt_text = "\n".join(message["content"] for message in messages)
+        if "Parse the meeting notes" in prompt_text:
+            self.parse_calls += 1
+            return json.dumps({}, ensure_ascii=False)
+        return FakeLLM.complete(self, messages, response_format=response_format)
+
+
 class ParseCrashLLM(FakeLLM):
     def complete(self, messages, response_format=None):
         prompt_text = "\n".join(message["content"] for message in messages)
@@ -174,6 +183,21 @@ def test_run_offline_evaluation_reuses_single_parse_result_for_workflow(tmp_path
     assert llm.parse_calls == 1
     assert bundle["case_results"][0]["parse_result"]["account_name"] == "Acme Robotics"
     assert bundle["case_results"][0]["workflow_result"]["dashboard_output"]["account_name"] == "Acme Robotics"
+
+
+def test_run_offline_evaluation_does_not_reparse_when_first_parse_is_empty_dict(tmp_path: Path):
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(json.dumps(_build_case("case-empty-parse"), ensure_ascii=False) + "\n", encoding="utf-8")
+    llm = EmptyParseLLM()
+
+    bundle = run_offline_evaluation(
+        cases_path=cases_path,
+        output_dir=tmp_path / "outputs",
+        llm_client=llm,
+    )
+
+    assert llm.parse_calls == 1
+    assert bundle["case_results"][0]["parse_result"] == {}
 
 
 def test_run_offline_evaluation_keeps_failing_case_in_summary_and_report(tmp_path: Path):

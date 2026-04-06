@@ -14,6 +14,7 @@ def run_sales_copilot(
     llm_client,
     account_id: int | None = None,
     meeting_summary: dict[str, Any] | None = None,
+    meeting_summary_provided: bool = False,
 ) -> dict[str, Any]:
     # 这里仅整理图所需状态；评测已拿到 parse 结果时可直接复用，避免重复请求模型。
     graph = build_sales_copilot_graph(llm_client=llm_client, database_path=database_path)
@@ -26,4 +27,6 @@ def run_sales_copilot(
         state["account_id"] = account_id
     if meeting_summary is not None:
         state["meeting_summary"] = dict(meeting_summary)
+    if meeting_summary_provided:
+        state["meeting_summary_provided"] = True
     return graph.invoke(state)

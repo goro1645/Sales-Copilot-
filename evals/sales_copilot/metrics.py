@@ -239,6 +239,9 @@ def summarize_parse_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "json_valid_rate": 0.0,
             "field_exact_match_rate": {field: 0.0 for field in SCALAR_FIELDS},
+            "list_field_precision": 0.0,
+            "list_field_recall": 0.0,
+            "list_field_f1": 0.0,
             "average_list_field_f1": 0.0,
             "risk_flag_recall": 0.0,
         }
@@ -251,17 +254,33 @@ def summarize_parse_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
             1.0 if row.get("field_exact_match", {}).get(field, False) else 0.0 for row in rows
         ) / total
 
+    list_field_precision_values: list[float] = []
+    list_field_recall_values: list[float] = []
     list_field_f1_values: list[float] = []
     for row in rows:
+        list_field_precision = row.get("list_field_precision", {})
+        list_field_recall = row.get("list_field_recall", {})
         list_field_f1 = row.get("list_field_f1", {})
         list_field_applicable = row.get("list_field_applicable", {})
-        if isinstance(list_field_f1, dict):
-            list_field_f1_values.extend(
-                float(list_field_f1.get(field, 0.0))
-                for field in LIST_FIELDS
-                if isinstance(list_field_applicable, dict) and list_field_applicable.get(field, False)
-            )
+        if not isinstance(list_field_applicable, dict):
+            continue
+        for field in LIST_FIELDS:
+            if not list_field_applicable.get(field, False):
+                continue
+            if isinstance(list_field_precision, dict):
+                list_field_precision_values.append(float(list_field_precision.get(field, 0.0)))
+            if isinstance(list_field_recall, dict):
+                list_field_recall_values.append(float(list_field_recall.get(field, 0.0)))
+            if isinstance(list_field_f1, dict):
+                list_field_f1_values.append(float(list_field_f1.get(field, 0.0)))
 
+    list_field_precision_average = (
+        sum(list_field_precision_values) / len(list_field_precision_values) if list_field_precision_values else 0.0
+    )
+    list_field_recall_average = (
+        sum(list_field_recall_values) / len(list_field_recall_values) if list_field_recall_values else 0.0
+    )
+    list_field_f1_average = sum(list_field_f1_values) / len(list_field_f1_values) if list_field_f1_values else 0.0
     average_list_field_f1 = sum(list_field_f1_values) / len(list_field_f1_values) if list_field_f1_values else 0.0
     risk_flag_values = [
         float(row.get("risk_flag_recall", 0.0))
@@ -273,6 +292,9 @@ def summarize_parse_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "json_valid_rate": json_valid_rate,
         "field_exact_match_rate": field_exact_match_rate,
+        "list_field_precision": list_field_precision_average,
+        "list_field_recall": list_field_recall_average,
+        "list_field_f1": list_field_f1_average,
         "average_list_field_f1": average_list_field_f1,
         "risk_flag_recall": risk_flag_recall,
     }

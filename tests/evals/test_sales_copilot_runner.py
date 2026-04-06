@@ -81,6 +81,22 @@ def _build_case(case_id: str) -> dict[str, object]:
     }
 
 
+def _build_failing_case(case_id: str) -> dict[str, object]:
+    case = _build_case(case_id)
+    case["segment"] = "medium_intent_nurture"
+    case["expected_workflow"] = {
+        "lead_score_range": [50, 79],
+        "lead_priority": "medium",
+        "opportunity_stage": "qualification",
+        "expected_route": "standard_follow_up",
+        "should_write_crm": False,
+        "should_generate_tasks": False,
+        "required_task_titles": [],
+        "required_risk_flags": [],
+    }
+    return case
+
+
 def test_run_offline_evaluation_returns_case_results_and_summary(tmp_path: Path):
     cases_path = tmp_path / "cases.jsonl"
     cases_path.write_text(json.dumps(_build_case("case-1"), ensure_ascii=False) + "\n", encoding="utf-8")
@@ -102,6 +118,39 @@ def test_run_offline_evaluation_returns_case_results_and_summary(tmp_path: Path)
     assert bundle["case_results"][0]["workflow_metrics"]["workflow_success"] is True
     assert bundle["case_results"][0]["workflow_result"]["crm_update_ids"]
     assert list_knowledge_chunks(bundle["case_results"][0]["database_path"])
+
+
+def test_run_offline_evaluation_keeps_failing_case_in_summary_and_report(tmp_path: Path):
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(
+        "\n".join(
+            [
+                json.dumps(_build_case("case-pass"), ensure_ascii=False),
+                json.dumps(_build_failing_case("case-fail"), ensure_ascii=False),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bundle = run_offline_evaluation(
+        cases_path=cases_path,
+        output_dir=tmp_path / "outputs",
+        llm_client=FakeLLM(),
+    )
+    report_dir = Path(write_report_bundle(bundle, tmp_path / "report"))
+    report_markdown = (report_dir / "report.md").read_text(encoding="utf-8")
+
+    assert bundle["summary"]["total_cases"] == 2
+    assert len(bundle["case_results"]) == 2
+    assert any(row["case_id"] == "case-fail" for row in bundle["case_results"])
+    assert any(row["workflow_metrics"]["workflow_success"] is True for row in bundle["case_results"])
+    assert "Top Failing Cases" in report_markdown
+    assert "case-fail" in report_markdown
+    assert "priority mismatch" in report_markdown.lower()
+    assert "stage mismatch" in report_markdown.lower()
+    assert "crm writeback mismatch" in report_markdown.lower()
+    assert "task generation mismatch" in report_markdown.lower()
 
 
 def test_write_report_bundle_writes_json_md_and_jsonl(tmp_path: Path):

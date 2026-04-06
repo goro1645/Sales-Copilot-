@@ -17,8 +17,16 @@ def _collect_failing_cases(case_results: list[dict[str, Any]]) -> list[dict[str,
             reasons.append("parse json invalid")
         if workflow_metrics.get("route_correct") is False:
             reasons.append("route mismatch")
+        if workflow_metrics.get("priority_correct") is False:
+            reasons.append("priority mismatch")
+        if workflow_metrics.get("stage_correct") is False:
+            reasons.append("stage mismatch")
         if workflow_metrics.get("score_in_range") is False:
             reasons.append("lead score out of range")
+        if workflow_metrics.get("crm_writeback_correct") is False:
+            reasons.append("crm writeback mismatch")
+        if workflow_metrics.get("task_generation_correct") is False:
+            reasons.append("task generation mismatch")
         if workflow_metrics.get("required_task_hit_rate", 1.0) not in (1, 1.0):
             reasons.append("required tasks missing")
         if reasons:

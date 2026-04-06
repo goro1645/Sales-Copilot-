@@ -129,6 +129,22 @@ def test_summarize_parse_metrics_aggregates_json_validity_and_average_f1():
         {
             "json_valid": True,
             "field_exact_match": {"account_name": True},
+            "list_field_precision": {
+                "customer_roles": 1.0,
+                "confirmed_needs": 1.0,
+                "budget_signals": 0.0,
+                "timeline_signals": 0.0,
+                "next_steps": 0.0,
+                "competitors": 0.0,
+            },
+            "list_field_recall": {
+                "customer_roles": 1.0,
+                "confirmed_needs": 1.0,
+                "budget_signals": 0.0,
+                "timeline_signals": 0.0,
+                "next_steps": 0.0,
+                "competitors": 0.0,
+            },
             "list_field_f1": {
                 "customer_roles": 1.0,
                 "confirmed_needs": 1.0,
@@ -151,6 +167,22 @@ def test_summarize_parse_metrics_aggregates_json_validity_and_average_f1():
         {
             "json_valid": False,
             "field_exact_match": {"account_name": False},
+            "list_field_precision": {
+                "customer_roles": 0.0,
+                "confirmed_needs": 0.0,
+                "budget_signals": 0.0,
+                "timeline_signals": 0.0,
+                "next_steps": 0.0,
+                "competitors": 0.0,
+            },
+            "list_field_recall": {
+                "customer_roles": 0.0,
+                "confirmed_needs": 0.0,
+                "budget_signals": 0.0,
+                "timeline_signals": 0.0,
+                "next_steps": 0.0,
+                "competitors": 0.0,
+            },
             "list_field_f1": {
                 "customer_roles": 0.0,
                 "confirmed_needs": 0.0,
@@ -176,6 +208,9 @@ def test_summarize_parse_metrics_aggregates_json_validity_and_average_f1():
 
     assert summary["json_valid_rate"] == 0.5
     assert summary["field_exact_match_rate"]["account_name"] == 0.5
+    assert summary["list_field_precision"] == 0.5
+    assert summary["list_field_recall"] == 0.5
+    assert summary["list_field_f1"] == 0.5
     assert summary["average_list_field_f1"] == 0.5
     assert summary["risk_flag_recall"] == 0.5
 

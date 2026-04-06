@@ -20,7 +20,7 @@ def _build_sales_case(
     required_risk_flags: list[str],
     next_steps: list[str] | None = None,
 ) -> dict[str, object]:
-    resolved_next_steps = next_steps or ["发送正式报价单", "安排试点评审会"]
+    resolved_next_steps = ["发送正式报价单", "安排试点评审会"] if next_steps is None else next_steps
     return {
         "case_id": case_id,
         "segment": segment,

@@ -12,6 +12,8 @@ from evals.sales_copilot.metrics import (
     summarize_workflow_metrics,
 )
 from sales_copilot.graph import parse_meeting_note_node
+from sales_copilot.mcp_client import SalesCopilotMCPClient
+from sales_copilot.mcp_server import SalesCopilotMCPServer
 from sales_copilot.runner import run_sales_copilot
 from sales_copilot.tools import seed_knowledge_chunks
 
@@ -62,12 +64,17 @@ def _run_parse_step(case: GoldenCase, *, llm_client, database_path: Path) -> dic
     return meeting_summary
 
 
-def _build_case_result(case: GoldenCase, *, output_dir: Path, llm_client) -> dict[str, Any]:
+def _build_case_result(case: GoldenCase, *, output_dir: Path, llm_client, execution_mode: str) -> dict[str, Any]:
     database_path = _prepare_case_database(case["case_id"], output_dir)
     _seed_case_database(database_path)
     errors: list[str] = []
     parse_result: dict[str, Any] = {}
     workflow_result: dict[str, Any] = {}
+    mcp_client = None
+
+    # 评测层在 mcp 模式下直接起一个本地 server/client，保证离线评测可以重复执行。
+    if execution_mode == "mcp":
+        mcp_client = SalesCopilotMCPClient(SalesCopilotMCPServer(database_path))
 
     try:
         parse_result = _run_parse_step(case, llm_client=llm_client, database_path=database_path)
@@ -83,6 +90,8 @@ def _build_case_result(case: GoldenCase, *, output_dir: Path, llm_client) -> dic
                 llm_client=llm_client,
                 meeting_summary=parse_result,
                 meeting_summary_provided=True,
+                execution_mode=execution_mode,
+                mcp_client=mcp_client,
             )
         except Exception as exc:
             errors.append(f"workflow error: {exc}")
@@ -102,17 +111,27 @@ def _build_case_result(case: GoldenCase, *, output_dir: Path, llm_client) -> dic
     }
 
 
-def run_offline_evaluation(cases_path, output_dir, llm_client) -> dict[str, Any]:
+def run_offline_evaluation(cases_path, output_dir, llm_client, execution_mode: str = "direct") -> dict[str, Any]:
     cases_file = Path(cases_path)
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
+    if execution_mode not in {"direct", "mcp"}:
+        raise ValueError(f"Unsupported execution mode: {execution_mode}")
 
     case_results = []
     for case in load_golden_cases(cases_file):
-        case_results.append(_build_case_result(case, output_dir=output_root, llm_client=llm_client))
+        case_results.append(
+            _build_case_result(
+                case,
+                output_dir=output_root,
+                llm_client=llm_client,
+                execution_mode=execution_mode,
+            )
+        )
     return {
         "cases_path": str(cases_file),
         "output_dir": str(output_root),
+        "execution_mode": execution_mode,
         "summary": {
             "total_cases": len(case_results),
             "parse": summarize_parse_metrics([row["parse_metrics"] for row in case_results]),

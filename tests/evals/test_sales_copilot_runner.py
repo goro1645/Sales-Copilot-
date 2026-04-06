@@ -5,7 +5,7 @@ from pathlib import Path
 
 from evals.sales_copilot.reporting import write_report_bundle
 from evals.sales_copilot.runner import run_offline_evaluation
-from sales_copilot.storage import list_knowledge_chunks
+from sales_copilot.storage import list_knowledge_chunks, list_tasks
 
 
 class FakeLLM:
@@ -167,6 +167,26 @@ def test_run_offline_evaluation_returns_case_results_and_summary(tmp_path: Path)
     assert bundle["case_results"][0]["workflow_metrics"]["workflow_success"] is True
     assert bundle["case_results"][0]["workflow_result"]["crm_update_ids"]
     assert list_knowledge_chunks(bundle["case_results"][0]["database_path"])
+
+
+def test_run_offline_evaluation_supports_mcp_mode(tmp_path: Path):
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(json.dumps(_build_case("case-mcp"), ensure_ascii=False) + "\n", encoding="utf-8")
+
+    bundle = run_offline_evaluation(
+        cases_path=cases_path,
+        output_dir=tmp_path / "outputs",
+        llm_client=FakeLLM(),
+        execution_mode="mcp",
+    )
+
+    case_result = bundle["case_results"][0]
+    tasks = list_tasks(case_result["database_path"])
+    assert bundle["summary"]["workflow"]["workflow_success_rate"] == 1.0
+    assert case_result["workflow_metrics"]["workflow_success"] is True
+    assert case_result["workflow_result"]["crm_update_ids"] == []
+    assert len(tasks) == 1
+    assert tasks[0]["title"] == "Send proposal"
 
 
 def test_run_offline_evaluation_reuses_single_parse_result_for_workflow(tmp_path: Path):
@@ -400,4 +420,5 @@ def test_run_sales_copilot_eval_cli_help_works_from_repo_root():
     assert completed.returncode == 0
     assert "Run Sales Copilot offline evaluation." in completed.stdout
     assert "--cases" in completed.stdout
+    assert "--execution-mode" in completed.stdout
     assert "--mode" in completed.stdout

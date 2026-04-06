@@ -23,6 +23,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cases", default=str(_default_cases_path()))
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--mode", choices=["offline"], default="offline")
+    parser.add_argument("--execution-mode", choices=["direct", "mcp"], default="direct")
     parser.add_argument("--api-base-url", default=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
     parser.add_argument("--api-model", default=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"))
     return parser
@@ -43,6 +44,7 @@ def main() -> int:
         cases_path=args.cases,
         output_dir=args.output_dir,
         llm_client=llm_client,
+        execution_mode=args.execution_mode,
     )
     report_dir = Path(write_report_bundle(bundle, args.output_dir))
 

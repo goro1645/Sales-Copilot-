@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from evals.sales_copilot.csds_adapter import CSDSCase, load_csds_cases
+from evals.sales_copilot.csds_adapter import CSDSCase, load_csds_cases, load_full_csds_cases
 from evals.sales_copilot.metrics import evaluate_parse_case, summarize_parse_metrics
 from sales_copilot.graph import parse_meeting_note_node
 
@@ -58,6 +58,28 @@ def run_csds_parse_evaluation(cases_path, output_dir, llm_client) -> dict[str, A
         "cases_path": str(cases_file),
         "output_dir": str(output_root),
         "dataset_kind": "csds",
+        "report_kind": "parse_only",
+        "summary": {
+            "total_cases": len(case_results),
+            "parse": summarize_parse_metrics([row["parse_metrics"] for row in case_results]),
+        },
+        "case_results": case_results,
+    }
+
+
+def run_full_csds_parse_evaluation(dataset_dir, output_dir, llm_client, *, splits: list[str] | None = None, limit: int | None = None) -> dict[str, Any]:
+    dataset_root = Path(dataset_dir)
+    output_root = Path(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    case_results = [
+        _build_case_result(case, llm_client=llm_client)
+        for case in load_full_csds_cases(dataset_root, splits=splits, limit=limit)
+    ]
+    return {
+        "cases_path": str(dataset_root),
+        "output_dir": str(output_root),
+        "dataset_kind": "full-csds",
         "report_kind": "parse_only",
         "summary": {
             "total_cases": len(case_results),

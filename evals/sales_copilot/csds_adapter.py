@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import Any, TypedDict, cast
 
 
 class CSDSExpectedParse(TypedDict):
@@ -51,6 +52,28 @@ _EXPECTED_PARSE_FIELDS = (
     "timeline_signals",
     "next_steps",
     "competitors",
+)
+_FULL_CSDS_SPLITS = ("train", "val", "test")
+_TIMELINE_PATTERNS = (
+    r"\d+个工作日",
+    r"\d+天",
+    r"明天",
+    r"今天",
+    r"次日",
+    r"审核后",
+    r"到账",
+    r"配送",
+    r"送达",
+)
+_BUDGET_PATTERNS = (
+    r"金额",
+    r"优惠券",
+    r"佣金",
+    r"扣费",
+    r"充值",
+    r"税点",
+    r"差价",
+    r"余额",
 )
 
 
@@ -137,3 +160,102 @@ def load_csds_cases(path: Path) -> list[CSDSCase]:
             except ValueError as exc:
                 raise ValueError(f"line {line_number}: {exc}") from exc
     return cast(list[CSDSCase], cases)
+
+
+def _normalize_text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def _service_account_name(qrole: str) -> str:
+    if "商家" in qrole:
+        return "京东商家客服"
+    if "物流" in qrole:
+        return "京东物流客服"
+    return "京东客服"
+
+
+def _extract_signal_lines(lines: list[str], patterns: tuple[str, ...]) -> list[str]:
+    result: list[str] = []
+    for line in lines:
+        if any(re.search(pattern, line) for pattern in patterns):
+            result.append(line)
+    return result
+
+
+def _build_full_csds_case(payload: dict[str, Any], *, split: str) -> CSDSCase:
+    dialogue_id = str(payload.get("DialogueID", "")).strip()
+    if not dialogue_id:
+        raise ValueError("DialogueID must be a non-empty value")
+    qrole = _ensure_non_empty_string(payload.get("QRole", ""), "QRole")
+    user_summ = _normalize_text_list(payload.get("UserSumm", []))
+    agent_summ = _normalize_text_list(payload.get("AgentSumm", []))
+    final_summ = _normalize_text_list(payload.get("FinalSumm", []))
+    account_name = _service_account_name(qrole)
+    return {
+        "case_id": f"csds_full_{split}_{dialogue_id}",
+        "segment": "customer_service_parse_only",
+        "source_dataset": "CSDS",
+        "source_uid": dialogue_id,
+        "source_split": split,
+        "source_note": "Official CSDS customer-service dialogue. Automatically adapted from UserSumm/AgentSumm/FinalSumm into parse-only evaluation input.",
+        "customer_profile_text": (
+            f"来源数据集：CSDS（公开真实中文客服对话语料）。账户名称：{account_name}。"
+            f"会话角色：{qrole}、客服。场景：官方CSDS全量样本。"
+        ),
+        "meeting_note_text": f"账户：{account_name}\n会话摘要：\n" + "\n".join(f"- {line}" for line in final_summ),
+        "expected_parse": {
+            "account_name": account_name,
+            "customer_roles": _dedupe_keep_order([qrole, "客服"]),
+            "confirmed_needs": user_summ,
+            "budget_signals": _extract_signal_lines(agent_summ, _BUDGET_PATTERNS),
+            "timeline_signals": _extract_signal_lines(agent_summ, _TIMELINE_PATTERNS),
+            "next_steps": agent_summ,
+            "competitors": [],
+        },
+        "expected_workflow": {"required_risk_flags": []},
+    }
+
+
+def _dedupe_keep_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return deduped
+
+
+def load_full_csds_cases(dataset_dir: Path, *, splits: list[str] | None = None, limit: int | None = None) -> list[CSDSCase]:
+    root = Path(dataset_dir)
+    selected_splits = splits or list(_FULL_CSDS_SPLITS)
+    for split in selected_splits:
+        if split not in _FULL_CSDS_SPLITS:
+            raise ValueError(f"unsupported CSDS split: {split}")
+    if limit is not None and limit <= 0:
+        raise ValueError("limit must be > 0")
+
+    cases: list[CSDSCase] = []
+    for split in selected_splits:
+        split_path = root / f"{split}.json"
+        if not split_path.exists():
+            raise ValueError(f"missing CSDS split file: {split_path}")
+        payload = json.loads(split_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise ValueError(f"split file must contain a JSON list: {split_path}")
+        for row in payload:
+            if not isinstance(row, dict):
+                raise ValueError(f"invalid CSDS row in {split_path}")
+            cases.append(_build_full_csds_case(cast(dict[str, Any], row), split=split))
+            if limit is not None and len(cases) >= limit:
+                return cases
+    return cases

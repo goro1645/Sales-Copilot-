@@ -2110,6 +2110,31 @@ Use the CSDS subset to report structure-focused metrics such as:
 - `average_list_field_f1`
 - `risk_flag_recall`
 
+### Full CSDS Local Evaluation
+
+The repo also supports running the parse-only benchmark against the full official CSDS dataset from your local machine without committing the raw dataset into git.
+
+- Expected local files: `train.json`, `val.json`, `test.json`
+- Data source: official CSDS download from the upstream project
+- Recommended use: full local benchmark or split-by-split regression runs
+- Honest phrasing for writeups: `based on the full public CSDS customer-service corpus through a local adapter`
+
+Example command:
+
+```powershell
+$env:CSDS_DATA_DIR='D:\minimind\.worktrees\minimind-job-agent\tmp_csds_download'
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\run_sales_copilot_eval.py' `
+  --dataset-kind full-csds `
+  --csds-data-dir $env:CSDS_DATA_DIR `
+  --csds-splits train,val,test `
+  --limit 100 `
+  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_full' `
+  --mode offline
+```
+
+For a quick smoke check, start with a small `--limit`.
+For a full run, remove `--limit` and keep in mind that API cost and runtime will increase substantially.
+
 ### Public Real Meeting Corpus Subset
 
 For a more defensible offline benchmark, the repo also includes a small public real meeting subset at `evals/sales_copilot/public_real_meetingbank_cases.jsonl`.

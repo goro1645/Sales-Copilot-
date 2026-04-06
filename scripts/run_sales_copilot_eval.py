@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from evals.sales_copilot.csds_runner import run_csds_parse_evaluation
+from evals.sales_copilot.csds_runner import run_csds_parse_evaluation, run_full_csds_parse_evaluation
 from evals.sales_copilot.reporting import write_report_bundle
 from evals.sales_copilot.runner import run_offline_evaluation
 from llm.deepseek_client import DeepSeekClient
@@ -23,8 +23,11 @@ def _default_cases_path(dataset_kind: str) -> Path:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Sales Copilot offline evaluation.")
-    parser.add_argument("--dataset-kind", choices=["golden", "csds"], default="golden")
+    parser.add_argument("--dataset-kind", choices=["golden", "csds", "full-csds"], default="golden")
     parser.add_argument("--cases", default=None)
+    parser.add_argument("--csds-data-dir", default=os.getenv("CSDS_DATA_DIR", ""))
+    parser.add_argument("--csds-splits", default="train,val,test")
+    parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--mode", choices=["offline"], default="offline")
     parser.add_argument("--execution-mode", choices=["direct", "mcp"], default="direct")
@@ -39,6 +42,7 @@ def main() -> int:
     if not api_key:
         raise SystemExit("Missing DeepSeek API key. Set DEEPSEEK_API_KEY.")
     cases_path = Path(args.cases) if args.cases else _default_cases_path(args.dataset_kind)
+    csds_splits = [part.strip() for part in str(args.csds_splits).split(",") if part.strip()]
 
     llm_client = DeepSeekClient(
         api_key=api_key,
@@ -50,6 +54,16 @@ def main() -> int:
             cases_path=cases_path,
             output_dir=args.output_dir,
             llm_client=llm_client,
+        )
+    elif args.dataset_kind == "full-csds":
+        if not args.csds_data_dir:
+            raise SystemExit("Missing CSDS data dir. Set --csds-data-dir or CSDS_DATA_DIR.")
+        bundle = run_full_csds_parse_evaluation(
+            dataset_dir=args.csds_data_dir,
+            output_dir=args.output_dir,
+            llm_client=llm_client,
+            splits=csds_splits,
+            limit=args.limit,
         )
     else:
         bundle = run_offline_evaluation(

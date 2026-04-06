@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from evals.sales_copilot.csds_runner import run_csds_parse_evaluation
+from evals.sales_copilot.csds_runner import run_csds_parse_evaluation, run_full_csds_parse_evaluation
 from evals.sales_copilot.reporting import write_report_bundle
 
 
@@ -90,3 +90,45 @@ def test_write_report_bundle_omits_workflow_section_for_parse_only_bundle(tmp_pa
 
     assert "## Parse Metrics" in report_markdown
     assert "## Workflow Metrics" not in report_markdown
+
+
+def test_run_full_csds_parse_evaluation_supports_local_dataset_dir_and_limit(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "csds"
+    dataset_dir.mkdir()
+    (dataset_dir / "train.json").write_text(
+        json.dumps(
+            [
+                {
+                    "DialogueID": 1,
+                    "QRole": "用户",
+                    "UserSumm": ["用户询问如何修改地址。"],
+                    "AgentSumm": ["客服说明未付款订单可直接修改地址。"],
+                    "FinalSumm": ["用户询问如何修改地址。", "客服说明未付款订单可直接修改地址。"],
+                },
+                {
+                    "DialogueID": 2,
+                    "QRole": "用户",
+                    "UserSumm": ["用户询问退款多久到账。"],
+                    "AgentSumm": ["客服说明会在3个工作日内到账。"],
+                    "FinalSumm": ["用户询问退款多久到账。", "客服说明会在3个工作日内到账。"],
+                },
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    llm = ParseOnlyLLM()
+    bundle = run_full_csds_parse_evaluation(
+        dataset_dir=dataset_dir,
+        output_dir=tmp_path / "outputs",
+        llm_client=llm,
+        splits=["train"],
+        limit=1,
+    )
+
+    assert llm.parse_calls == 1
+    assert bundle["dataset_kind"] == "full-csds"
+    assert bundle["report_kind"] == "parse_only"
+    assert bundle["summary"]["total_cases"] == 1
+    assert bundle["case_results"][0]["source_split"] == "train"

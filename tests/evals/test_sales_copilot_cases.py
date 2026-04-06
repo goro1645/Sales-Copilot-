@@ -59,6 +59,12 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
         "high_intent_missing_facts",
         "medium_intent_nurture",
         "low_intent_or_noise",
+        "manufacturing_complete_002",
+        "enterprise_complete_001",
+        "saas_complete_001",
+        "healthcare_missing_002",
+        "manufacturing_missing_001",
+        "retail_missing_001",
     ]
     assert by_case_id["high_intent_complete"]["expected_parse"]["account_name"] == "华东制造集团"
     assert by_case_id["high_intent_complete"]["segment"] == "high_intent_complete"
@@ -113,6 +119,54 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["should_generate_tasks"] is False
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["required_task_titles"] == []
     assert by_case_id["low_intent_or_noise"]["expected_workflow"]["required_risk_flags"] == []
+
+    assert by_case_id["manufacturing_complete_002"]["expected_parse"]["account_name"] == "Acme Robotics"
+    assert by_case_id["manufacturing_complete_002"]["expected_workflow"]["lead_score_range"] == [80, 95]
+    assert by_case_id["manufacturing_complete_002"]["expected_workflow"]["required_task_titles"] == [
+        "Run deployment workshop",
+    ]
+
+    assert by_case_id["enterprise_complete_001"]["expected_parse"]["account_name"] == "Northstar Logistics"
+    assert by_case_id["enterprise_complete_001"]["expected_workflow"]["lead_score_range"] == [80, 92]
+    assert by_case_id["enterprise_complete_001"]["expected_workflow"]["required_task_titles"] == [
+        "Send proposal",
+    ]
+
+    assert by_case_id["saas_complete_001"]["expected_parse"]["account_name"] == "Aurora SaaS"
+    assert by_case_id["saas_complete_001"]["expected_workflow"]["lead_score_range"] == [80, 90]
+    assert by_case_id["saas_complete_001"]["expected_workflow"]["required_task_titles"] == [
+        "Send statement of work",
+    ]
+
+    assert by_case_id["healthcare_missing_002"]["expected_parse"]["account_name"] == "BluePeak Health"
+    assert by_case_id["healthcare_missing_002"]["expected_workflow"]["lead_score_range"] == [80, 84]
+    assert by_case_id["healthcare_missing_002"]["expected_workflow"]["required_task_titles"] == [
+        "Confirm budget range",
+        "Confirm decision timeline",
+    ]
+    assert by_case_id["healthcare_missing_002"]["expected_workflow"]["required_risk_flags"] == [
+        "missing_required_facts"
+    ]
+
+    assert by_case_id["manufacturing_missing_001"]["expected_parse"]["account_name"] == "Delta Machines"
+    assert by_case_id["manufacturing_missing_001"]["expected_workflow"]["lead_score_range"] == [80, 82]
+    assert by_case_id["manufacturing_missing_001"]["expected_workflow"]["required_task_titles"] == [
+        "Identify decision makers",
+        "Schedule qualification follow-up",
+    ]
+    assert by_case_id["manufacturing_missing_001"]["expected_workflow"]["required_risk_flags"] == [
+        "missing_required_facts"
+    ]
+
+    assert by_case_id["retail_missing_001"]["expected_parse"]["account_name"] == "Harbor Retail Group"
+    assert by_case_id["retail_missing_001"]["expected_workflow"]["lead_score_range"] == [80, 80]
+    assert by_case_id["retail_missing_001"]["expected_workflow"]["required_task_titles"] == [
+        "Confirm budget range",
+        "Confirm decision timeline",
+    ]
+    assert by_case_id["retail_missing_001"]["expected_workflow"]["required_risk_flags"] == [
+        "missing_required_facts"
+    ]
     for case in cases:
         allowed_missing_fact_titles = {
             "Confirm budget range",

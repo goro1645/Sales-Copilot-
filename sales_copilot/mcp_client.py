@@ -10,7 +10,7 @@ class SalesCopilotMCPClient:
         self.server = server
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any] | None = None):
-        return self.server.call_tool(tool_name, arguments or {})
+        return self.server.call_tool(tool_name, arguments)
 
     def get_account(self, account_id: int):
         return self.call_tool("get_account", {"account_id": account_id})
@@ -30,20 +30,19 @@ class SalesCopilotMCPClient:
         description: str,
         priority: str,
         due_at: str,
-        status: str = "open",
+        status: str | None = None,
     ):
-        return self.call_tool(
-            "create_task",
-            {
-                "account_id": account_id,
-                "meeting_id": meeting_id,
-                "title": title,
-                "description": description,
-                "priority": priority,
-                "due_at": due_at,
-                "status": status,
-            },
-        )
+        arguments: dict[str, Any] = {
+            "account_id": account_id,
+            "meeting_id": meeting_id,
+            "title": title,
+            "description": description,
+            "priority": priority,
+            "due_at": due_at,
+        }
+        if status is not None:
+            arguments["status"] = status
+        return self.call_tool("create_task", arguments)
 
     def update_account_stage(
         self,

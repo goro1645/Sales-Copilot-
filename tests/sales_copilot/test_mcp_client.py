@@ -6,9 +6,8 @@ class FakeMCPServer:
         self.calls = []
 
     def call_tool(self, tool_name, arguments=None):
-        payload = arguments or {}
-        self.calls.append((tool_name, payload))
-        return {"tool_name": tool_name, "arguments": payload}
+        self.calls.append((tool_name, arguments))
+        return {"tool_name": tool_name, "arguments": arguments, "metadata": {"echo": True}}
 
 
 def test_mcp_client_get_account_calls_server():
@@ -19,7 +18,7 @@ def test_mcp_client_get_account_calls_server():
 
     result = client.get_account(42)
 
-    assert result["tool_name"] == "get_account"
+    assert result == {"tool_name": "get_account", "arguments": {"account_id": 42}, "metadata": {"echo": True}}
     assert server.calls == [("get_account", {"account_id": 42})]
 
 
@@ -31,7 +30,11 @@ def test_mcp_client_list_account_tasks_calls_server():
 
     result = client.list_account_tasks(42, status="open")
 
-    assert result["tool_name"] == "list_account_tasks"
+    assert result == {
+        "tool_name": "list_account_tasks",
+        "arguments": {"account_id": 42, "status": "open"},
+        "metadata": {"echo": True},
+    }
     assert server.calls == [("list_account_tasks", {"account_id": 42, "status": "open"})]
 
 
@@ -48,10 +51,20 @@ def test_mcp_client_create_task_calls_server():
         description="Book the technical workshop",
         priority="high",
         due_at="2026-04-10",
-        status="open",
     )
 
-    assert result["tool_name"] == "create_task"
+    assert result == {
+        "tool_name": "create_task",
+        "arguments": {
+            "account_id": 42,
+            "meeting_id": 7,
+            "title": "Schedule workshop",
+            "description": "Book the technical workshop",
+            "priority": "high",
+            "due_at": "2026-04-10",
+        },
+        "metadata": {"echo": True},
+    }
     assert server.calls == [
         (
             "create_task",
@@ -62,7 +75,6 @@ def test_mcp_client_create_task_calls_server():
                 "description": "Book the technical workshop",
                 "priority": "high",
                 "due_at": "2026-04-10",
-                "status": "open",
             },
         )
     ]
@@ -81,7 +93,16 @@ def test_mcp_client_update_account_stage_calls_server():
         last_contact_at="2026-04-06",
     )
 
-    assert result["tool_name"] == "update_account_stage"
+    assert result == {
+        "tool_name": "update_account_stage",
+        "arguments": {
+            "account_id": 42,
+            "status": "active",
+            "opportunity_stage": "proposal",
+            "last_contact_at": "2026-04-06",
+        },
+        "metadata": {"echo": True},
+    }
     assert server.calls == [
         (
             "update_account_stage",

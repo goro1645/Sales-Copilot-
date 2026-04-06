@@ -2080,3 +2080,24 @@ Recommended local metrics for honest project reporting:
 - `task_generation_hit_rate`
 - `required_task_hit_rate`
 - `mcp tool success rate`
+
+### Public Real Meeting Corpus Subset
+
+For a more defensible offline benchmark, the repo also includes a small public real meeting subset at `evals/sales_copilot/public_real_meetingbank_cases.jsonl`.
+
+- Source corpus: `MeetingBank`
+- Source type: public real meeting summaries and transcripts
+- Adaptation method: manual sales-style relabeling on top of the public meeting content
+- Honest phrasing for writeups: `based on a public real meeting corpus and a self-built gold set`
+
+Example command:
+
+```powershell
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\run_sales_copilot_eval.py' `
+  --cases 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\public_real_meetingbank_cases.jsonl' `
+  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_public_real' `
+  --mode offline `
+  --execution-mode mcp
+```
+
+If `DEEPSEEK_API_KEY` is not set, keep this dataset for schema validation and later model runs. Do not present results from this subset as real enterprise CRM production metrics.

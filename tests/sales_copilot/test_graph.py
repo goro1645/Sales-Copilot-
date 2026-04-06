@@ -8,6 +8,28 @@ class _FakeLLMClient:
         return "{}"
 
 
+class _RecordingLLMClient:
+    def __init__(self) -> None:
+        self.calls: list[list[dict]] = []
+
+    def complete(self, messages, response_format=None):
+        self.calls.append(messages)
+        prompt_text = "\n".join(message["content"] for message in messages)
+        if "Parse the meeting notes" in prompt_text:
+            return (
+                '{"account_name": "Acme Robotics", "customer_roles": ["CTO"], '
+                '"confirmed_needs": ["pricing overview"], "objections": [], '
+                '"next_steps": ["send proposal"], "budget_signals": ["budget approved"], '
+                '"timeline_signals": ["this quarter"], "competitors": []}'
+            )
+        if "Evaluate the lead" in prompt_text:
+            return (
+                '{"lead_score": 40, "lead_priority": "low", "opportunity_stage": "discovery", '
+                '"risk_flags": [], "reasons": ["needs nurture"], "evidence": ["pricing overview"]}'
+            )
+        return "{}"
+
+
 def test_route_after_lead_evaluation_returns_need_more_info():
     state = {
         "meeting_summary": {},
@@ -176,6 +198,30 @@ def test_standard_follow_up_branch_runs_through_write_back_crm(tmp_path: Path):
         "write_back_crm",
         "generate_dashboard_output",
     ]
+
+
+def test_parse_meeting_note_uses_existing_summary_only_when_note_is_empty(tmp_path: Path):
+    llm_client = _RecordingLLMClient()
+    graph = build_sales_copilot_graph(
+        llm_client=llm_client,
+        database_path=tmp_path / "sales_copilot.db",
+    )
+
+    graph.invoke(
+        {
+            "customer_profile_raw": "Acme Robotics is a manufacturing company.",
+            "meeting_note_raw": "Need pricing overview.",
+            "meeting_summary": {"confirmed_needs": ["stale summary"]},
+            "lead_score": 40,
+            "lead_priority": "low",
+            "risk_flags": [],
+            "workflow_log": [],
+        }
+    )
+
+    assert len(llm_client.calls) == 2
+    assert "Parse the meeting notes" in "\n".join(message["content"] for message in llm_client.calls[0])
+    assert "Evaluate the lead" in "\n".join(message["content"] for message in llm_client.calls[1])
 
 
 def test_build_sales_copilot_graph_compiles_with_stubs(tmp_path: Path):

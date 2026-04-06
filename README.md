@@ -2052,5 +2052,5 @@ Use `scripts/run_sales_copilot_eval.py` to run the offline benchmark for regress
 ```
 
 The command writes `report.json`, `report.md`, and `case_results.jsonl` under the output directory.
-
+If your local clone or virtual environment lives elsewhere, replace those absolute paths with the ones on your machine.
 

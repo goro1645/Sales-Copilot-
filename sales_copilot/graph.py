@@ -366,7 +366,9 @@ def parse_meeting_note_node(state: SalesCopilotState, *, llm_client, database_pa
     del database_path
     existing_summary = state.get("meeting_summary")
     # Allow pre-seeded summaries in tests and callers to flow through unchanged.
-    if state.get("meeting_summary_provided") or (isinstance(existing_summary, dict) and existing_summary):
+    if state.get("meeting_summary_provided") or (
+        isinstance(existing_summary, dict) and existing_summary and not state.get("meeting_note_raw")
+    ):
         return _step_result(state, "parse_meeting_note", {"meeting_summary": existing_summary})
     messages = build_meeting_parse_messages(
         customer_profile_text=state.get("customer_profile_raw", ""),

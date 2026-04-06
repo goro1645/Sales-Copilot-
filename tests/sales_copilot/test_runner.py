@@ -77,7 +77,7 @@ class RefreshingLLM:
             return (
                 '{"summary": "Send updated proposal", "tasks": [{"title": "Send proposal", '
                 '"description": "Send revised proposal", "priority": "medium", '
-                '"due_at": "2026-04-03"}]}'
+                '"due_at": "2026-04-04"}]}'
             )
         raise AssertionError(f"Unexpected prompt: {prompt_text}")
 
@@ -332,6 +332,7 @@ def test_run_sales_copilot_refreshes_existing_meeting_and_task_records(tmp_path:
 
     meeting_rows = list_meeting_records(db_path)
     task_rows = list_tasks(db_path)
+    memory_row = get_account_memory(db_path, first["account_id"])
 
     assert first["account_id"] == second["account_id"]
     assert len(meeting_rows) == 1
@@ -339,9 +340,14 @@ def test_run_sales_copilot_refreshes_existing_meeting_and_task_records(tmp_path:
     assert meeting_rows[0]["lead_score"] == 70
     assert meeting_rows[0]["priority"] == "medium"
     assert len(task_rows) == 1
+    assert task_rows[0]["due_at"] == "2026-04-04"
     assert task_rows[0]["description"] == "Send revised proposal"
     assert task_rows[0]["priority"] == "medium"
     assert task_rows[0]["status"] == "open"
+    assert json.loads(memory_row["confirmed_needs_json"]) == ["pricing and procurement"]
+    assert json.loads(memory_row["timeline_signals_json"]) == ["next quarter"]
+    assert json.loads(memory_row["decision_makers_json"]) == ["CFO"]
+    assert memory_row["recommended_next_step"] == "Send updated proposal"
 
 
 def test_run_sales_copilot_accepts_common_scoring_alias_fields(tmp_path: Path):

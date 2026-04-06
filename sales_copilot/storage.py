@@ -230,12 +230,13 @@ def update_task_record(db_path, *, task_id: int, record: dict) -> None:
         cursor = conn.execute(
             """
             UPDATE tasks
-            SET description = ?, priority = ?, status = ?
+            SET description = ?, priority = ?, due_at = ?, status = ?
             WHERE id = ?
             """,
             (
                 record["description"],
                 record["priority"],
+                record["due_at"],
                 record["status"],
                 task_id,
             ),

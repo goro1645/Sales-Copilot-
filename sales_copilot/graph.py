@@ -28,6 +28,7 @@ from sales_copilot.storage import (
     save_task_record,
     update_meeting_record,
     update_task_record,
+    upsert_account_memory,
 )
 from sales_copilot.tools import (
     append_account_memory,
@@ -329,14 +330,13 @@ def _find_existing_task(
     account_id: int,
     meeting_id: int,
     title: str,
-    due_at: str,
 ) -> int | None:
     for row in list_tasks(db_path):
         if (
             row["account_id"] == account_id
             and row["meeting_id"] == meeting_id
             and row["title"] == title
-            and row["due_at"] == due_at
+            and row["status"] == "open"
         ):
             return row["id"]
     return None
@@ -517,11 +517,13 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
     meeting_summary = state.get("meeting_summary", {})
     meeting_id = state.get("meeting_id")
     meeting_title = meeting_summary.get("account_name") or f"{account_name} meeting"
+    meeting_reused = bool(meeting_id)
     if not meeting_id:
         meeting_note_raw = state.get("meeting_note_raw", "")
         existing_meeting_id = _find_existing_meeting(database_path, account_id=account_id, meeting_note_raw=meeting_note_raw)
         if existing_meeting_id is not None:
             meeting_id = existing_meeting_id
+            meeting_reused = True
             update_meeting_record(
                 database_path,
                 meeting_id=meeting_id,
@@ -557,7 +559,6 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
             account_id=account_id,
             meeting_id=meeting_id,
             title=title,
-            due_at=due_at,
         )
         if existing_task_id is not None:
             update_task_record(
@@ -566,6 +567,7 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
                 record={
                     "description": task.get("description", title),
                     "priority": task.get("priority", state.get("lead_priority", "medium")),
+                    "due_at": due_at,
                     "status": task.get("status", "open"),
                 },
             )
@@ -616,7 +618,10 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
         "risk_flags_json": json.dumps(_normalize_list(state.get("risk_flags")), ensure_ascii=False),
         "recommended_next_step": str((state.get("follow_up_plan") or {}).get("summary", "")).strip(),
     }
-    append_account_memory(database_path, account_id, memory_payload)
+    if meeting_reused:
+        upsert_account_memory(database_path, account_id, memory_payload)
+    else:
+        append_account_memory(database_path, account_id, memory_payload)
 
     return _step_result(
         state,

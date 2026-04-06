@@ -1,4 +1,9 @@
-from evals.sales_copilot.metrics import evaluate_parse_case, summarize_parse_metrics
+from evals.sales_copilot.metrics import (
+    evaluate_parse_case,
+    evaluate_workflow_case,
+    summarize_parse_metrics,
+    summarize_workflow_metrics,
+)
 
 
 def test_evaluate_parse_case_scores_scalar_and_list_fields():
@@ -278,3 +283,81 @@ def test_summarize_parse_metrics_includes_invalid_rows_when_gold_fields_are_appl
     assert summary["json_valid_rate"] == 0.5
     assert summary["average_list_field_f1"] == 0.5
     assert summary["risk_flag_recall"] == 0.5
+
+
+def test_evaluate_workflow_case_scores_route_score_crm_and_tasks():
+    case = {
+        "expected_workflow": {
+            "lead_score_range": [50, 79],
+            "lead_priority": "medium",
+            "opportunity_stage": "qualification",
+            "expected_route": "standard_follow_up",
+            "should_write_crm": True,
+            "should_generate_tasks": True,
+            "required_task_titles": ["Schedule workshop"],
+            "required_risk_flags": [],
+        }
+    }
+    actual_result = {
+        "workflow_log": [
+            {"event": "route_decided", "route": "standard_follow_up"},
+            {"event": "task_created", "task_title": "Schedule workshop"},
+        ],
+        "score": 72,
+        "priority": "medium",
+        "stage": "qualification",
+        "crm_writeback": True,
+        "task_payload": [
+            {"title": "Schedule workshop"},
+            {"title": "Send recap"},
+        ],
+    }
+
+    metrics = evaluate_workflow_case(case, actual_result)
+
+    assert metrics["workflow_success"] is True
+    assert metrics["route_correct"] is True
+    assert metrics["priority_correct"] is True
+    assert metrics["stage_correct"] is True
+    assert metrics["score_in_range"] is True
+    assert metrics["crm_writeback_correct"] is True
+    assert metrics["task_generation_correct"] is True
+    assert metrics["required_task_hit_rate"] == 1.0
+
+
+def test_summarize_workflow_metrics_aggregates_success_route_and_required_task_hit_rate():
+    rows = [
+        {
+            "workflow_success": True,
+            "route_correct": True,
+            "priority_correct": True,
+            "stage_correct": True,
+            "score_in_range": True,
+            "crm_writeback_correct": True,
+            "task_generation_correct": True,
+            "required_task_hit_rate": 1.0,
+            "required_task_applicable": True,
+        },
+        {
+            "workflow_success": False,
+            "route_correct": False,
+            "priority_correct": True,
+            "stage_correct": True,
+            "score_in_range": True,
+            "crm_writeback_correct": True,
+            "task_generation_correct": False,
+            "required_task_hit_rate": 0.0,
+            "required_task_applicable": True,
+        },
+    ]
+
+    summary = summarize_workflow_metrics(rows)
+
+    assert summary["workflow_success_rate"] == 0.5
+    assert summary["route_accuracy"] == 0.5
+    assert summary["priority_accuracy"] == 1.0
+    assert summary["stage_accuracy"] == 1.0
+    assert summary["score_range_accuracy"] == 1.0
+    assert summary["crm_writeback_accuracy"] == 1.0
+    assert summary["task_generation_hit_rate"] == 0.5
+    assert summary["required_task_hit_rate"] == 0.5

@@ -126,6 +126,9 @@ _SEGMENT_CONTRACTS = {
                 "score_max": 79,
             },
         ),
+        "fallback_route": "need_more_info",
+        "score_min": 35,
+        "score_max": 79,
     },
     "low_intent_or_noise": {
         "lead_priority": "low",
@@ -272,32 +275,46 @@ def _validate_segment_contract(
                 f"({route_band[0]}..{route_band[1]})"
             )
     else:
-        matched_combination = None
-        for combination in allowed_combinations:
+        fallback_route = contract.get("fallback_route")
+        if fallback_route is not None and expected_route == fallback_route:
+            if lead_score_range[0] < contract["score_min"] or lead_score_range[1] > contract["score_max"]:
+                raise ValueError(
+                    f"{label} lead_score_range must stay within {contract['score_min']}..{contract['score_max']}"
+                )
+            if not _score_range_overlaps_route(lead_score_range, expected_route):
+                route_band = _ROUTE_SCORE_BANDS[expected_route]
+                raise ValueError(
+                    f"{label} lead_score_range must overlap with {expected_route} "
+                    f"({route_band[0]}..{route_band[1]})"
+                )
+            matched_combination = True
+        else:
+            matched_combination = None
+            for combination in allowed_combinations:
+                if (
+                    lead_priority == combination["lead_priority"]
+                    and expected_route == combination["expected_route"]
+                ):
+                    matched_combination = combination
+                    break
+            if matched_combination is None:
+                raise ValueError(
+                    f"{label} must use one of the allowed lead_priority/expected_route combinations"
+                )
             if (
-                lead_priority == combination["lead_priority"]
-                and expected_route == combination["expected_route"]
+                lead_score_range[0] < matched_combination["score_min"]
+                or lead_score_range[1] > matched_combination["score_max"]
             ):
-                matched_combination = combination
-                break
-        if matched_combination is None:
-            raise ValueError(
-                f"{label} must use one of the allowed lead_priority/expected_route combinations"
-            )
-        if (
-            lead_score_range[0] < matched_combination["score_min"]
-            or lead_score_range[1] > matched_combination["score_max"]
-        ):
-            raise ValueError(
-                f"{label} lead_score_range must stay within "
-                f"{matched_combination['score_min']}..{matched_combination['score_max']}"
-            )
-        if not _score_range_overlaps_route(lead_score_range, expected_route):
-            route_band = _ROUTE_SCORE_BANDS[expected_route]
-            raise ValueError(
-                f"{label} lead_score_range must overlap with {expected_route} "
-                f"({route_band[0]}..{route_band[1]})"
-            )
+                raise ValueError(
+                    f"{label} lead_score_range must stay within "
+                    f"{matched_combination['score_min']}..{matched_combination['score_max']}"
+                )
+            if not _score_range_overlaps_route(lead_score_range, expected_route):
+                route_band = _ROUTE_SCORE_BANDS[expected_route]
+                raise ValueError(
+                    f"{label} lead_score_range must overlap with {expected_route} "
+                    f"({route_band[0]}..{route_band[1]})"
+                )
     if segment == "high_intent_missing_facts" and "missing_required_facts" not in required_risk_flags:
         raise ValueError(f"{label} missing_required_facts must be present for this segment")
     if segment != "high_intent_missing_facts" and "missing_required_facts" in required_risk_flags:

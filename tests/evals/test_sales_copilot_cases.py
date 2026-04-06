@@ -213,6 +213,31 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
             assert title in case["expected_parse"]["next_steps"] or title in allowed_missing_fact_titles
 
 
+def test_load_golden_cases_allows_medium_nurture_need_more_info_route(tmp_path):
+    path = tmp_path / "medium_need_more_info.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "medium_need_more_info",
+                segment="medium_intent_nurture",
+                lead_score_range=[55, 69],
+                lead_priority="medium",
+                opportunity_stage="discovery",
+                expected_route="need_more_info",
+                should_write_crm=True,
+                should_generate_tasks=False,
+                required_task_titles=[],
+                required_risk_flags=[],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    cases = load_golden_cases(path)
+
+    assert cases[0]["expected_workflow"]["expected_route"] == "need_more_info"
+
+
 def test_golden_case_file_has_unique_ids_and_balanced_segment_coverage():
     cases = load_golden_cases(Path(__file__).resolve().parents[2] / "evals" / "sales_copilot" / "golden_cases.jsonl")
 

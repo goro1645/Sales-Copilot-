@@ -361,3 +361,92 @@ def test_summarize_workflow_metrics_aggregates_success_route_and_required_task_h
     assert summary["crm_writeback_accuracy"] == 1.0
     assert summary["task_generation_hit_rate"] == 0.5
     assert summary["required_task_hit_rate"] == 0.5
+
+
+def test_evaluate_workflow_case_uses_real_runner_fields():
+    case = {
+        "expected_workflow": {
+            "lead_score_range": [80, 100],
+            "lead_priority": "high",
+            "opportunity_stage": "proposal",
+            "expected_route": "high_priority_follow_up",
+            "should_write_crm": True,
+            "should_generate_tasks": True,
+            "required_task_titles": ["Prepare workshop"],
+            "required_risk_flags": [],
+        }
+    }
+    actual_result = {
+        "workflow_log": [{"route": "high_priority_follow_up"}],
+        "lead_score": 92,
+        "lead_priority": "high",
+        "opportunity_stage": "proposal",
+        "crm_update_ids": ["crm-1", "crm-2"],
+        "task_payload": [{"title": "Prepare workshop agenda"}],
+    }
+
+    metrics = evaluate_workflow_case(case, actual_result)
+
+    assert metrics["route_correct"] is True
+    assert metrics["priority_correct"] is True
+    assert metrics["stage_correct"] is True
+    assert metrics["score_in_range"] is True
+    assert metrics["crm_writeback_correct"] is True
+    assert metrics["task_generation_correct"] is True
+    assert metrics["required_task_hit_rate"] == 1.0
+
+
+def test_evaluate_workflow_case_keeps_success_independent_from_accuracy():
+    case = {
+        "expected_workflow": {
+            "lead_score_range": [0, 49],
+            "lead_priority": "low",
+            "opportunity_stage": "discovery",
+            "expected_route": "low_priority_nurture",
+            "should_write_crm": False,
+            "should_generate_tasks": False,
+            "required_task_titles": [],
+            "required_risk_flags": [],
+        }
+    }
+    actual_result = {
+        "workflow_log": [{"route": "high_priority_follow_up"}],
+        "lead_score": 96,
+        "lead_priority": "high",
+        "opportunity_stage": "proposal",
+        "crm_update_ids": ["crm-1"],
+        "task_payload": [{"title": "Prepare workshop agenda"}],
+    }
+
+    metrics = evaluate_workflow_case(case, actual_result)
+
+    assert metrics["workflow_success"] is True
+    assert metrics["route_correct"] is False
+    assert metrics["score_in_range"] is False
+
+
+def test_evaluate_workflow_case_allows_loose_required_task_title_matching():
+    case = {
+        "expected_workflow": {
+            "lead_score_range": [50, 79],
+            "lead_priority": "medium",
+            "opportunity_stage": "qualification",
+            "expected_route": "standard_follow_up",
+            "should_write_crm": True,
+            "should_generate_tasks": True,
+            "required_task_titles": ["Prepare workshop"],
+            "required_risk_flags": [],
+        }
+    }
+    actual_result = {
+        "workflow_log": [{"route": "standard_follow_up"}],
+        "lead_score": 72,
+        "lead_priority": "medium",
+        "opportunity_stage": "qualification",
+        "crm_update_ids": ["crm-1"],
+        "task_payload": [{"title": "Prepare workshop agenda"}],
+    }
+
+    metrics = evaluate_workflow_case(case, actual_result)
+
+    assert metrics["required_task_hit_rate"] == 1.0

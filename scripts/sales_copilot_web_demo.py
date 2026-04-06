@@ -10,6 +10,8 @@ __package__ = "scripts"
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from llm.deepseek_client import DeepSeekClient
+from sales_copilot.mcp_client import SalesCopilotMCPClient
+from sales_copilot.mcp_server import SalesCopilotMCPServer
 from sales_copilot.runner import run_sales_copilot
 from scripts.sales_copilot_web_utils import (
     build_card_html,
@@ -189,6 +191,7 @@ def _ensure_session_defaults() -> None:
     st.session_state.setdefault("api_base_url", "https://api.deepseek.com")
     st.session_state.setdefault("api_key", os.getenv("DEEPSEEK_API_KEY", ""))
     st.session_state.setdefault("api_model", "deepseek-chat")
+    st.session_state.setdefault("execution_mode", "direct")
     st.session_state.setdefault("database_path", str(DEFAULT_DATABASE_PATH))
     st.session_state.setdefault("last_result", None)
     st.session_state.setdefault("last_error", "")
@@ -297,6 +300,7 @@ def main() -> None:
         api_base_url = st.text_input("DeepSeek Base URL", key="api_base_url")
         api_key = st.text_input("DeepSeek API Key", key="api_key", type="password")
         api_model = st.text_input("Model", key="api_model")
+        execution_mode = st.selectbox("Execution Mode", ("direct", "mcp"), key="execution_mode")
         database_path = st.text_input("SQLite Path", key="database_path")
         st.caption("页面可以先打开；真正运行工作流时，需要填写可用的 DeepSeek API key。")
 
@@ -328,11 +332,16 @@ def main() -> None:
         else:
             try:
                 st.session_state["last_error"] = ""
+                mcp_client = None
+                if execution_mode == "mcp":
+                    mcp_client = SalesCopilotMCPClient(SalesCopilotMCPServer(database_path))
                 st.session_state["last_result"] = run_sales_copilot(
                     customer_profile_text=customer_profile_text,
                     meeting_note_text=meeting_note_text,
                     database_path=database_path,
                     llm_client=llm_client,
+                    execution_mode=execution_mode,
+                    mcp_client=mcp_client,
                 )
             except Exception as exc:  # pragma: no cover - UI side error surfacing
                 clear_run_result_state(st.session_state, f"运行失败: {exc}")

@@ -26,6 +26,7 @@ from sales_copilot.storage import (
     save_account,
     save_meeting_record,
     save_task_record,
+    update_account_stage_and_status,
     update_meeting_record,
     update_task_record,
     upsert_account_memory,
@@ -100,6 +101,31 @@ def _normalize_list(value: Any) -> list[str]:
         return [str(item).strip() for item in value if str(item).strip()]
     text = str(value).strip()
     return [text] if text else []
+
+
+def _json_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return [text]
+        return _json_list(parsed)
+    return _normalize_list(value)
+
+
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return deduped
 
 
 def _first_payload_value(payload: dict[str, Any], *keys: str) -> Any:
@@ -355,6 +381,59 @@ def _find_existing_crm_update(
     return None
 
 
+def _build_reused_meeting_memory_payload(
+    db_path: Path | str,
+    *,
+    account_id: int,
+    meeting_id: int,
+    risk_flags: list[str],
+    recommended_next_step: str,
+) -> dict[str, Any]:
+    # 重跑已有 meeting 时，账号级 memory 不能直接被当前 meeting 覆盖。
+    # 这里先按账号下的全部 meeting 记录重建“可从 meeting_summary 推导”的聚合字段，
+    # 再只对缺少独立 meeting 维度持久化的字段做有界回退。
+    account_meetings = [row for row in list_meeting_records(db_path) if row["account_id"] == account_id]
+    confirmed_needs: list[str] = []
+    budget_signals: list[str] = []
+    timeline_signals: list[str] = []
+    decision_makers: list[str] = []
+    for row in account_meetings:
+        try:
+            meeting_summary = json.loads(row["meeting_summary_json"])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(meeting_summary, dict):
+            continue
+        confirmed_needs.extend(_normalize_list(meeting_summary.get("confirmed_needs")))
+        budget_signals.extend(_normalize_list(meeting_summary.get("budget_signals")))
+        timeline_signals.extend(_normalize_list(meeting_summary.get("timeline_signals")))
+        decision_makers.extend(_normalize_list(meeting_summary.get("customer_roles")))
+
+    existing_memory = get_account_memory(db_path, account_id) or {}
+    latest_meeting_id = account_meetings[-1]["id"] if account_meetings else None
+
+    if len(account_meetings) <= 1:
+        merged_risk_flags = _dedupe_preserve_order(risk_flags)
+    else:
+        merged_risk_flags = _dedupe_preserve_order(_json_list(existing_memory.get("risk_flags_json")) + risk_flags)
+
+    # 旧 meeting replay 不应该抢掉更新 meeting 已经写入的下一步建议；
+    # 只有当前 meeting 本身就是最新一条记录时，才允许它刷新账号级 next step。
+    existing_next_step = str(existing_memory.get("recommended_next_step", "")).strip()
+    if latest_meeting_id == meeting_id:
+        next_step = recommended_next_step or existing_next_step
+    else:
+        next_step = existing_next_step or recommended_next_step
+    return {
+        "confirmed_needs_json": json.dumps(_dedupe_preserve_order(confirmed_needs), ensure_ascii=False),
+        "budget_signals_json": json.dumps(_dedupe_preserve_order(budget_signals), ensure_ascii=False),
+        "timeline_signals_json": json.dumps(_dedupe_preserve_order(timeline_signals), ensure_ascii=False),
+        "decision_makers_json": json.dumps(_dedupe_preserve_order(decision_makers), ensure_ascii=False),
+        "risk_flags_json": json.dumps(merged_risk_flags, ensure_ascii=False),
+        "recommended_next_step": next_step,
+    }
+
+
 def ingest_files_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
     del llm_client, database_path
     customer_profile_raw = state.get("customer_profile_raw", "")
@@ -602,6 +681,13 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
         after_json=crm_after_json,
     )
     if existing_crm_update_id is not None:
+        update_account_stage_and_status(
+            database_path,
+            account_id=account_id,
+            status=crm_after["status"],
+            opportunity_stage=crm_after["opportunity_stage"],
+            last_contact_at=crm_after["last_contact_at"],
+        )
         crm_update_id = existing_crm_update_id
     else:
         crm_update_id = update_crm_account(
@@ -610,16 +696,27 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
             crm_after,
         )
 
+    recommended_next_step = str((state.get("follow_up_plan") or {}).get("summary", "")).strip()
     memory_payload = {
         "confirmed_needs_json": json.dumps(_normalize_list(meeting_summary.get("confirmed_needs")), ensure_ascii=False),
         "budget_signals_json": json.dumps(_normalize_list(meeting_summary.get("budget_signals")), ensure_ascii=False),
         "timeline_signals_json": json.dumps(_normalize_list(meeting_summary.get("timeline_signals")), ensure_ascii=False),
         "decision_makers_json": json.dumps(_normalize_list(meeting_summary.get("customer_roles")), ensure_ascii=False),
         "risk_flags_json": json.dumps(_normalize_list(state.get("risk_flags")), ensure_ascii=False),
-        "recommended_next_step": str((state.get("follow_up_plan") or {}).get("summary", "")).strip(),
+        "recommended_next_step": recommended_next_step,
     }
     if meeting_reused:
-        upsert_account_memory(database_path, account_id, memory_payload)
+        upsert_account_memory(
+            database_path,
+            account_id,
+            _build_reused_meeting_memory_payload(
+                database_path,
+                account_id=account_id,
+                meeting_id=meeting_id,
+                risk_flags=_normalize_list(state.get("risk_flags")),
+                recommended_next_step=recommended_next_step,
+            ),
+        )
     else:
         append_account_memory(database_path, account_id, memory_payload)
 

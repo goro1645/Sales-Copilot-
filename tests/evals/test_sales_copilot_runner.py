@@ -92,8 +92,10 @@ def test_run_offline_evaluation_returns_case_results_and_summary(tmp_path: Path)
     )
 
     assert bundle["summary"]["total_cases"] == 1
-    assert "parse_summary" in bundle["summary"]
-    assert "workflow_summary" in bundle["summary"]
+    assert "parse" in bundle["summary"]
+    assert "workflow" in bundle["summary"]
+    assert "parse_summary" not in bundle["summary"]
+    assert "workflow_summary" not in bundle["summary"]
     assert len(bundle["case_results"]) == 1
     assert bundle["case_results"][0]["case_id"] == "case-1"
     assert bundle["case_results"][0]["parse_metrics"]["json_valid"] is True
@@ -106,33 +108,40 @@ def test_write_report_bundle_writes_json_md_and_jsonl(tmp_path: Path):
     bundle = {
         "summary": {
             "total_cases": 1,
-            "parse_summary": {"json_valid_rate": 1.0},
-            "workflow_summary": {"workflow_success_rate": 1.0},
+            "parse": {"json_valid_rate": 1.0, "average_list_field_f1": 1.0},
+            "workflow": {"workflow_success_rate": 1.0, "route_accuracy": 1.0},
         },
         "case_results": [
             {
                 "case_id": "case-1",
                 "segment": "high_intent_complete",
                 "database_path": str(tmp_path / "case-1.db"),
-                "parse_metrics": {"json_valid": True},
-                "workflow_metrics": {"workflow_success": True},
+                "parse_metrics": {"json_valid": True, "field_exact_match": {"account_name": True}},
+                "workflow_metrics": {"workflow_success": True, "route_correct": True},
                 "parse_result": {"account_name": "Acme Robotics"},
                 "workflow_result": {"lead_score": 88},
             }
         ],
     }
 
-    paths = write_report_bundle(bundle, tmp_path / "report")
+    report_dir = Path(write_report_bundle(bundle, tmp_path / "report"))
 
-    report_json = Path(paths["report_json"])
-    report_md = Path(paths["report_md"])
-    case_results_jsonl = Path(paths["case_results_jsonl"])
+    report_json = report_dir / "report.json"
+    report_md = report_dir / "report.md"
+    case_results_jsonl = report_dir / "case_results.jsonl"
 
+    assert report_dir.parent == tmp_path / "report"
+    assert report_dir.name.isdigit()
     assert report_json.exists()
     assert report_md.exists()
     assert case_results_jsonl.exists()
     assert '"total_cases": 1' in report_json.read_text(encoding="utf-8")
-    assert "# Sales Copilot Offline Eval Report" in report_md.read_text(encoding="utf-8")
+    report_markdown = report_md.read_text(encoding="utf-8")
+    assert "# Sales Copilot Offline Eval Report" in report_markdown
+    assert "dataset size" in report_markdown.lower()
+    assert "segment distribution" in report_markdown.lower()
+    assert "average_list_field_f1" in report_markdown
+    assert "route_accuracy" in report_markdown
     assert '"case_id": "case-1"' in case_results_jsonl.read_text(encoding="utf-8")
 
 
@@ -149,3 +158,5 @@ def test_run_sales_copilot_eval_cli_help_works_from_repo_root():
 
     assert completed.returncode == 0
     assert "Run Sales Copilot offline evaluation." in completed.stdout
+    assert "--cases" in completed.stdout
+    assert "--mode" in completed.stdout

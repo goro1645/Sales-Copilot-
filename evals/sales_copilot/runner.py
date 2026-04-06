@@ -13,7 +13,10 @@ from evals.sales_copilot.metrics import (
 )
 from sales_copilot.graph import parse_meeting_note_node
 from sales_copilot.runner import run_sales_copilot
-from sales_copilot.tools import sample_playbook_chunks, sample_product_chunks, seed_knowledge_chunks
+from sales_copilot.tools import seed_knowledge_chunks
+
+
+_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "sales_copilot"
 
 
 def _prepare_case_database(case_id: str, output_dir: Path) -> Path:
@@ -25,10 +28,22 @@ def _prepare_case_database(case_id: str, output_dir: Path) -> Path:
     return database_path
 
 
+def _load_seed_rows(path: Path) -> list[dict[str, Any]]:
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        chunks = payload.get("chunks", [])
+        if isinstance(chunks, list):
+            return chunks
+    raise ValueError(f"Invalid seed data: {path}")
+
+
 def _seed_case_database(database_path: Path) -> None:
-    # 每个 case 用独立库，并在跑流程前写入两份固定知识库，避免串库和脏状态。
-    seed_knowledge_chunks(database_path, sample_product_chunks())
-    seed_knowledge_chunks(database_path, sample_playbook_chunks())
+    # 每个 case 都直接从仓库 seed 文件写入知识块，保证评测输入和计划一致。
+    seed_knowledge_chunks(database_path, _load_seed_rows(_DATA_DIR / "seed_product_knowledge.json"))
+    seed_knowledge_chunks(database_path, _load_seed_rows(_DATA_DIR / "seed_sales_playbook.json"))
 
 
 def _run_parse_step(case: GoldenCase, *, llm_client, database_path: Path) -> dict[str, Any]:
@@ -50,7 +65,6 @@ def _run_parse_step(case: GoldenCase, *, llm_client, database_path: Path) -> dic
 def _build_case_result(case: GoldenCase, *, output_dir: Path, llm_client) -> dict[str, Any]:
     database_path = _prepare_case_database(case["case_id"], output_dir)
     _seed_case_database(database_path)
-
     parse_result = _run_parse_step(case, llm_client=llm_client, database_path=database_path)
     workflow_result = run_sales_copilot(
         customer_profile_text=case["customer_profile_text"],
@@ -58,8 +72,6 @@ def _build_case_result(case: GoldenCase, *, output_dir: Path, llm_client) -> dic
         database_path=database_path,
         llm_client=llm_client,
     )
-    parse_metrics = evaluate_parse_case(case, parse_result)
-    workflow_metrics = evaluate_workflow_case(case, workflow_result)
     return {
         "case_id": case["case_id"],
         "segment": case["segment"],
@@ -68,8 +80,8 @@ def _build_case_result(case: GoldenCase, *, output_dir: Path, llm_client) -> dic
         "expected_workflow": case["expected_workflow"],
         "parse_result": parse_result,
         "workflow_result": workflow_result,
-        "parse_metrics": parse_metrics,
-        "workflow_metrics": workflow_metrics,
+        "parse_metrics": evaluate_parse_case(case, parse_result),
+        "workflow_metrics": evaluate_workflow_case(case, workflow_result),
     }
 
 
@@ -82,15 +94,13 @@ def run_offline_evaluation(cases_path, output_dir, llm_client) -> dict[str, Any]
         _build_case_result(case, output_dir=output_root, llm_client=llm_client)
         for case in load_golden_cases(cases_file)
     ]
-    parse_rows = [row["parse_metrics"] for row in case_results]
-    workflow_rows = [row["workflow_metrics"] for row in case_results]
     return {
         "cases_path": str(cases_file),
         "output_dir": str(output_root),
         "summary": {
             "total_cases": len(case_results),
-            "parse_summary": summarize_parse_metrics(parse_rows),
-            "workflow_summary": summarize_workflow_metrics(workflow_rows),
+            "parse": summarize_parse_metrics([row["parse_metrics"] for row in case_results]),
+            "workflow": summarize_workflow_metrics([row["workflow_metrics"] for row in case_results]),
         },
         "case_results": case_results,
     }

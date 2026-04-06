@@ -26,6 +26,8 @@ from sales_copilot.storage import (
     save_account,
     save_meeting_record,
     save_task_record,
+    update_meeting_record,
+    update_task_record,
 )
 from sales_copilot.tools import (
     append_account_memory,
@@ -514,17 +516,28 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
 
     meeting_summary = state.get("meeting_summary", {})
     meeting_id = state.get("meeting_id")
+    meeting_title = meeting_summary.get("account_name") or f"{account_name} meeting"
     if not meeting_id:
         meeting_note_raw = state.get("meeting_note_raw", "")
         existing_meeting_id = _find_existing_meeting(database_path, account_id=account_id, meeting_note_raw=meeting_note_raw)
         if existing_meeting_id is not None:
             meeting_id = existing_meeting_id
+            update_meeting_record(
+                database_path,
+                meeting_id=meeting_id,
+                record={
+                    "meeting_title": meeting_title,
+                    "meeting_summary_json": json.dumps(meeting_summary, ensure_ascii=False),
+                    "lead_score": state.get("lead_score", 0),
+                    "priority": state.get("lead_priority", "medium"),
+                },
+            )
         else:
             meeting_id = save_meeting_record(
                 database_path,
                 {
                     "account_id": account_id,
-                    "meeting_title": meeting_summary.get("account_name") or f"{account_name} meeting",
+                    "meeting_title": meeting_title,
                     "meeting_note_raw": meeting_note_raw,
                     "meeting_summary_json": json.dumps(meeting_summary, ensure_ascii=False),
                     "lead_score": state.get("lead_score", 0),
@@ -547,6 +560,15 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
             due_at=due_at,
         )
         if existing_task_id is not None:
+            update_task_record(
+                database_path,
+                task_id=existing_task_id,
+                record={
+                    "description": task.get("description", title),
+                    "priority": task.get("priority", state.get("lead_priority", "medium")),
+                    "status": task.get("status", "open"),
+                },
+            )
             task_ids.append(existing_task_id)
             continue
         task_ids.append(
@@ -610,8 +632,8 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
 
 
 def generate_dashboard_output_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
-    del llm_client, database_path
-    account_name = _resolve_account_name(state)
+    del llm_client
+    account_name = _resolve_account_name(state, database_path=database_path)
     follow_up_plan = state.get("follow_up_plan", {})
     dashboard_messages = build_dashboard_summary_messages(
         meeting_parse_json=json.dumps(state.get("meeting_summary", {}), ensure_ascii=False),

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from sales_copilot.storage import get_account_memory, list_accounts, list_crm_updates, list_meeting_records, list_tasks
@@ -28,6 +29,54 @@ class FakeLLM:
             return (
                 '{"summary": "Send proposal", "tasks": [{"title": "Send proposal", '
                 '"description": "Send tailored proposal", "priority": "high", '
+                '"due_at": "2026-04-03"}]}'
+            )
+        raise AssertionError(f"Unexpected prompt: {prompt_text}")
+
+
+class RefreshingLLM:
+    def __init__(self) -> None:
+        self.calls: list[list[dict]] = []
+        self.run_index = 0
+
+    def complete(self, messages, response_format=None):
+        self.calls.append(messages)
+        prompt_text = "\n".join(message["content"] for message in messages)
+        if "Parse the meeting notes" in prompt_text:
+            self.run_index += 1
+            if self.run_index == 1:
+                return (
+                    '{"account_name": "Acme Robotics", "customer_roles": ["CTO"], '
+                    '"confirmed_needs": ["private deployment"], "objections": [], '
+                    '"next_steps": ["send proposal"], "budget_signals": ["budget approved"], '
+                    '"timeline_signals": ["this quarter"], "competitors": []}'
+                )
+            return (
+                '{"account_name": "Acme Robotics", "customer_roles": ["CFO"], '
+                '"confirmed_needs": ["pricing and procurement"], "objections": [], '
+                '"next_steps": ["review pricing"], "budget_signals": ["budget approved"], '
+                '"timeline_signals": ["next quarter"], "competitors": []}'
+            )
+        if "Evaluate the lead" in prompt_text:
+            if self.run_index == 1:
+                return (
+                    '{"lead_score": 88, "lead_priority": "high", "opportunity_stage": "proposal", '
+                    '"risk_flags": [], "reasons": ["strong fit"], "evidence": ["confirmed need"]}'
+                )
+            return (
+                '{"lead_score": 70, "lead_priority": "medium", "opportunity_stage": "proposal", '
+                '"risk_flags": [], "reasons": ["still strong"], "evidence": ["confirmed need"]}'
+            )
+        if "follow-up plan" in prompt_text.lower():
+            if self.run_index == 1:
+                return (
+                    '{"summary": "Send proposal", "tasks": [{"title": "Send proposal", '
+                    '"description": "Send first proposal", "priority": "high", '
+                    '"due_at": "2026-04-03"}]}'
+                )
+            return (
+                '{"summary": "Send updated proposal", "tasks": [{"title": "Send proposal", '
+                '"description": "Send revised proposal", "priority": "medium", '
                 '"due_at": "2026-04-03"}]}'
             )
         raise AssertionError(f"Unexpected prompt: {prompt_text}")
@@ -261,6 +310,38 @@ def test_run_sales_copilot_keeps_same_task_title_for_different_meetings(tmp_path
     assert second["open_tasks"]
     assert any(task["title"] == "Send proposal" for task in second["open_tasks"])
     assert any("CTO requested a proposal for private deployment." == row["meeting_note_raw"] for row in second["retrieved_docs"])
+
+
+def test_run_sales_copilot_refreshes_existing_meeting_and_task_records(tmp_path: Path):
+    db_path = tmp_path / "sales.db"
+    llm = RefreshingLLM()
+
+    first = run_sales_copilot(
+        customer_profile_text="Acme Robotics is a manufacturing company.",
+        meeting_note_text="CTO requested a proposal for private deployment.",
+        database_path=db_path,
+        llm_client=llm,
+    )
+    second = run_sales_copilot(
+        customer_profile_text="Acme Robotics is a manufacturing company.",
+        meeting_note_text="CTO requested a proposal for private deployment.",
+        database_path=db_path,
+        llm_client=llm,
+        account_id=first["account_id"],
+    )
+
+    meeting_rows = list_meeting_records(db_path)
+    task_rows = list_tasks(db_path)
+
+    assert first["account_id"] == second["account_id"]
+    assert len(meeting_rows) == 1
+    assert json.loads(meeting_rows[0]["meeting_summary_json"])["confirmed_needs"] == ["pricing and procurement"]
+    assert meeting_rows[0]["lead_score"] == 70
+    assert meeting_rows[0]["priority"] == "medium"
+    assert len(task_rows) == 1
+    assert task_rows[0]["description"] == "Send revised proposal"
+    assert task_rows[0]["priority"] == "medium"
+    assert task_rows[0]["status"] == "open"
 
 
 def test_run_sales_copilot_accepts_common_scoring_alias_fields(tmp_path: Path):

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from sales_copilot.graph import build_sales_copilot_graph, route_after_lead_evaluation
+from sales_copilot.storage import save_account
 
 
 class _FakeLLMClient:
@@ -26,6 +27,29 @@ class _RecordingLLMClient:
             return (
                 '{"lead_score": 40, "lead_priority": "low", "opportunity_stage": "discovery", '
                 '"risk_flags": [], "reasons": ["needs nurture"], "evidence": ["pricing overview"]}'
+            )
+        if "follow-up plan" in prompt_text.lower():
+            return (
+                '{"summary": "Send proposal", "tasks": [{"title": "Send proposal", '
+                '"description": "Send tailored proposal", "priority": "high", '
+                '"due_at": "2026-04-03"}]}'
+            )
+        return "{}"
+
+
+class _DashboardNameLLMClient:
+    def complete(self, messages, response_format=None):
+        prompt_text = "\n".join(message["content"] for message in messages)
+        if "Evaluate the lead" in prompt_text:
+            return (
+                '{"lead_score": 88, "lead_priority": "high", "opportunity_stage": "proposal", '
+                '"risk_flags": [], "reasons": ["strong fit"], "evidence": ["confirmed need"]}'
+            )
+        if "follow-up plan" in prompt_text.lower():
+            return (
+                '{"summary": "Send proposal", "tasks": [{"title": "Send proposal", '
+                '"description": "Send tailored proposal", "priority": "high", '
+                '"due_at": "2026-04-03"}]}'
             )
         return "{}"
 
@@ -222,6 +246,39 @@ def test_parse_meeting_note_uses_existing_summary_only_when_note_is_empty(tmp_pa
     assert len(llm_client.calls) == 2
     assert "Parse the meeting notes" in "\n".join(message["content"] for message in llm_client.calls[0])
     assert "Evaluate the lead" in "\n".join(message["content"] for message in llm_client.calls[1])
+
+
+def test_dashboard_output_prefers_database_account_name(tmp_path: Path):
+    db_path = tmp_path / "sales_copilot.db"
+    account_id = save_account(
+        db_path,
+        {
+            "name": "Acme Robotics",
+            "industry": "Manufacturing",
+            "size_segment": "Mid-Market",
+            "status": "active",
+            "opportunity_stage": "discovery",
+        },
+    )
+    graph = build_sales_copilot_graph(
+        llm_client=_DashboardNameLLMClient(),
+        database_path=db_path,
+    )
+
+    result = graph.invoke(
+        {
+            "account_id": account_id,
+            "customer_profile_raw": "Enterprise customer profile.",
+            "meeting_summary": {"confirmed_needs": ["private deployment"]},
+            "meeting_summary_provided": True,
+            "lead_score": 88,
+            "lead_priority": "high",
+            "risk_flags": [],
+            "workflow_log": [],
+        }
+    )
+
+    assert result["dashboard_output"]["account_name"] == "Acme Robotics"
 
 
 def test_build_sales_copilot_graph_compiles_with_stubs(tmp_path: Path):

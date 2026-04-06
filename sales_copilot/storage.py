@@ -153,6 +153,28 @@ def save_meeting_record(db_path, record: dict) -> int:
         return cursor.lastrowid
 
 
+def update_meeting_record(db_path, *, meeting_id: int, record: dict) -> None:
+    init_storage(db_path)
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE meeting_records
+            SET meeting_title = ?, meeting_summary_json = ?, lead_score = ?, priority = ?
+            WHERE id = ?
+            """,
+            (
+                record["meeting_title"],
+                record["meeting_summary_json"],
+                record["lead_score"],
+                record["priority"],
+                meeting_id,
+            ),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Meeting {meeting_id} does not exist")
+        conn.commit()
+
+
 def list_meeting_records(db_path) -> list[dict]:
     init_storage(db_path)
     with _connect(db_path) as conn:
@@ -200,6 +222,27 @@ def save_task_record(db_path, record: dict) -> int:
         )
         conn.commit()
         return cursor.lastrowid
+
+
+def update_task_record(db_path, *, task_id: int, record: dict) -> None:
+    init_storage(db_path)
+    with _connect(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE tasks
+            SET description = ?, priority = ?, status = ?
+            WHERE id = ?
+            """,
+            (
+                record["description"],
+                record["priority"],
+                record["status"],
+                task_id,
+            ),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Task {task_id} does not exist")
+        conn.commit()
 
 
 def list_tasks(db_path) -> list[dict]:

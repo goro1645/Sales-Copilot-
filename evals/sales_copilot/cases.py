@@ -112,9 +112,11 @@ _SEGMENT_CONTRACTS = {
         "score_max": 100,
     },
     "medium_intent_nurture": {
+        "lead_priorities": {"low", "medium"},
         "lead_priority": "medium",
+        "expected_routes": {"standard_follow_up", "low_priority_nurture"},
         "expected_route": "standard_follow_up",
-        "score_min": 50,
+        "score_min": 35,
         "score_max": 79,
     },
     "low_intent_or_noise": {
@@ -238,7 +240,11 @@ def _validate_segment_contract(
     if contract is None:
         raise ValueError(f"{label} must be one of {sorted(_SEGMENT_CONTRACTS)}")
 
-    if lead_priority != contract["lead_priority"]:
+    allowed_priorities = contract.get("lead_priorities")
+    if allowed_priorities is None:
+        if lead_priority != contract["lead_priority"]:
+            raise ValueError(f"{label} lead_priority must be {contract['lead_priority']}")
+    elif lead_priority not in allowed_priorities:
         raise ValueError(f"{label} lead_priority must be {contract['lead_priority']}")
     if lead_score_range[0] < contract["score_min"] or lead_score_range[1] > contract["score_max"]:
         raise ValueError(

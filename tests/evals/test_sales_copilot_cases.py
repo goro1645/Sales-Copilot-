@@ -174,19 +174,21 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
         "missing_required_facts"
     ]
     assert by_case_id["retail_nurture_002"]["expected_parse"]["account_name"] == "Northwind Traders"
-    assert by_case_id["retail_nurture_002"]["expected_workflow"]["lead_priority"] == "medium"
+    assert by_case_id["retail_nurture_002"]["expected_workflow"]["lead_priority"] == "low"
     assert by_case_id["retail_nurture_002"]["expected_workflow"]["opportunity_stage"] == "discovery"
-    assert by_case_id["retail_nurture_002"]["expected_workflow"]["lead_score_range"] == [55, 69]
-    assert by_case_id["retail_nurture_002"]["expected_workflow"]["expected_route"] == "standard_follow_up"
+    assert by_case_id["retail_nurture_002"]["expected_workflow"]["lead_score_range"] == [35, 49]
+    assert by_case_id["retail_nurture_002"]["expected_workflow"]["expected_route"] == "low_priority_nurture"
     assert by_case_id["retail_nurture_002"]["expected_workflow"]["required_task_titles"] == []
 
     assert by_case_id["finance_nurture_001"]["expected_parse"]["account_name"] == "Meridian Finance"
-    assert by_case_id["finance_nurture_001"]["expected_workflow"]["lead_priority"] == "medium"
-    assert by_case_id["finance_nurture_001"]["expected_workflow"]["lead_score_range"] == [55, 69]
+    assert by_case_id["finance_nurture_001"]["expected_workflow"]["lead_priority"] == "low"
+    assert by_case_id["finance_nurture_001"]["expected_workflow"]["lead_score_range"] == [35, 49]
+    assert by_case_id["finance_nurture_001"]["expected_workflow"]["expected_route"] == "low_priority_nurture"
 
     assert by_case_id["education_nurture_001"]["expected_parse"]["account_name"] == "Summit Education"
-    assert by_case_id["education_nurture_001"]["expected_workflow"]["lead_priority"] == "medium"
-    assert by_case_id["education_nurture_001"]["expected_workflow"]["lead_score_range"] == [55, 69]
+    assert by_case_id["education_nurture_001"]["expected_workflow"]["lead_priority"] == "low"
+    assert by_case_id["education_nurture_001"]["expected_workflow"]["lead_score_range"] == [35, 49]
+    assert by_case_id["education_nurture_001"]["expected_workflow"]["expected_route"] == "low_priority_nurture"
 
     assert by_case_id["noise_002"]["expected_parse"]["account_name"] == "Orchard Foods"
     assert by_case_id["noise_002"]["expected_workflow"]["lead_score_range"] == [0, 35]

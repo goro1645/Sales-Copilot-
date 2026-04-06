@@ -108,6 +108,7 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
     assert by_case_id["medium_intent_nurture"]["expected_workflow"]["lead_priority"] == "medium"
     assert by_case_id["medium_intent_nurture"]["expected_workflow"]["opportunity_stage"] == "discovery"
     assert by_case_id["medium_intent_nurture"]["expected_workflow"]["lead_score_range"] == [55, 69]
+    assert by_case_id["medium_intent_nurture"]["expected_workflow"]["expected_route"] == "standard_follow_up"
     assert by_case_id["medium_intent_nurture"]["expected_workflow"]["should_write_crm"] is True
     assert by_case_id["medium_intent_nurture"]["expected_workflow"]["should_generate_tasks"] is True
     assert by_case_id["medium_intent_nurture"]["expected_workflow"]["required_task_titles"] == [
@@ -473,6 +474,54 @@ def test_load_golden_cases_raises_when_required_task_titles_are_not_next_steps_s
     )
 
     with pytest.raises(ValueError, match="required_task_titles"):
+        load_golden_cases(path)
+
+
+def test_load_golden_cases_raises_when_medium_nurture_pair_is_mismatched_to_route(tmp_path):
+    path = tmp_path / "bad_medium_nurture_pair_route.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "bad_medium_nurture_pair_route",
+                segment="medium_intent_nurture",
+                lead_score_range=[35, 49],
+                lead_priority="medium",
+                opportunity_stage="discovery",
+                expected_route="low_priority_nurture",
+                should_write_crm=True,
+                should_generate_tasks=False,
+                required_task_titles=[],
+                required_risk_flags=[],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="allowed lead_priority/expected_route combinations"):
+        load_golden_cases(path)
+
+
+def test_load_golden_cases_raises_when_medium_nurture_pair_is_mismatched_to_priority(tmp_path):
+    path = tmp_path / "bad_medium_nurture_pair_priority.jsonl"
+    path.write_text(
+        json.dumps(
+            _build_sales_case(
+                "bad_medium_nurture_pair_priority",
+                segment="medium_intent_nurture",
+                lead_score_range=[55, 69],
+                lead_priority="low",
+                opportunity_stage="discovery",
+                expected_route="standard_follow_up",
+                should_write_crm=True,
+                should_generate_tasks=False,
+                required_task_titles=[],
+                required_risk_flags=[],
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="allowed lead_priority/expected_route combinations"):
         load_golden_cases(path)
 
 

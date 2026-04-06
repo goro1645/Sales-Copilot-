@@ -85,6 +85,11 @@ _ALLOWED_OPPORTUNITY_STAGES = {
 }
 _ALLOWED_LEAD_PRIORITIES = {"low", "medium", "high"}
 _STABLE_RISK_FLAG_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_ROUTE_SCORE_BANDS = {
+    "low_priority_nurture": (0, 49),
+    "standard_follow_up": (50, 79),
+    "high_priority_follow_up": (80, 100),
+}
 _DETERMINISTIC_MISSING_FACTS_TASK_TITLES = {
     "Confirm budget range",
     "Confirm decision timeline",
@@ -102,7 +107,7 @@ _SEGMENT_CONTRACTS = {
     "high_intent_missing_facts": {
         "lead_priority": "high",
         "expected_route": "high_priority_follow_up",
-        "score_min": 62,
+        "score_min": 50,
         "score_max": 100,
     },
     "medium_intent_nurture": {
@@ -187,6 +192,17 @@ def _ensure_lead_score_range(value: object, label: str) -> list[int]:
     return normalized
 
 
+def _score_range_overlaps_route(score_range: list[int], route: str) -> bool:
+    if route == "need_more_info":
+        return True
+    route_band = _ROUTE_SCORE_BANDS.get(route)
+    if route_band is None:
+        return False
+    score_min, score_max = score_range
+    route_min, route_max = route_band
+    return not (score_max < route_min or score_min > route_max)
+
+
 def _ensure_segment(value: object, label: str) -> str:
     segment = _ensure_string(value, label)
     if segment not in _ALLOWED_SEGMENTS:
@@ -218,16 +234,15 @@ def _validate_segment_contract(
 
     if lead_priority != contract["lead_priority"]:
         raise ValueError(f"{label} lead_priority must be {contract['lead_priority']}")
-    if segment == "high_intent_missing_facts":
-        if expected_route not in {"high_priority_follow_up", "standard_follow_up", "need_more_info"}:
-            raise ValueError(
-                f"{label} expected_route must be standard_follow_up or high_priority_follow_up"
-            )
-    elif expected_route != contract["expected_route"] and expected_route != "need_more_info":
-        raise ValueError(f"{label} expected_route must be {contract['expected_route']}")
     if lead_score_range[0] < contract["score_min"] or lead_score_range[1] > contract["score_max"]:
         raise ValueError(
             f"{label} lead_score_range must stay within {contract['score_min']}..{contract['score_max']}"
+        )
+    if not _score_range_overlaps_route(lead_score_range, expected_route):
+        route_band = _ROUTE_SCORE_BANDS[expected_route]
+        raise ValueError(
+            f"{label} lead_score_range must overlap with {expected_route} "
+            f"({route_band[0]}..{route_band[1]})"
         )
     if segment == "high_intent_missing_facts" and "missing_required_facts" not in required_risk_flags:
         raise ValueError(f"{label} missing_required_facts must be present for this segment")

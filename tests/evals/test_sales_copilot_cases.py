@@ -51,7 +51,7 @@ def _build_sales_case(
 def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract():
     path = Path(__file__).resolve().parents[2] / "evals" / "sales_copilot" / "golden_cases.jsonl"
 
-    cases = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    cases = load_golden_cases(path)
     by_case_id = {case["case_id"]: case for case in cases}
 
     assert list(by_case_id) == [
@@ -141,8 +141,8 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
     assert by_case_id["healthcare_missing_002"]["expected_parse"]["account_name"] == "BluePeak Health"
     assert by_case_id["healthcare_missing_002"]["expected_workflow"]["lead_score_range"] == [65, 80]
     assert by_case_id["healthcare_missing_002"]["expected_workflow"]["required_task_titles"] == [
-        "confirm budget range",
-        "confirm decision timeline",
+        "Confirm budget range",
+        "Confirm decision timeline",
     ]
     assert by_case_id["healthcare_missing_002"]["expected_workflow"]["required_risk_flags"] == [
         "missing_required_facts"
@@ -151,8 +151,8 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
     assert by_case_id["manufacturing_missing_001"]["expected_parse"]["account_name"] == "Delta Machines"
     assert by_case_id["manufacturing_missing_001"]["expected_workflow"]["lead_score_range"] == [68, 82]
     assert by_case_id["manufacturing_missing_001"]["expected_workflow"]["required_task_titles"] == [
-        "identify decision makers",
-        "schedule qualification follow-up",
+        "Identify decision makers",
+        "Schedule qualification follow-up",
     ]
     assert by_case_id["manufacturing_missing_001"]["expected_workflow"]["required_risk_flags"] == [
         "missing_required_facts"
@@ -161,22 +161,22 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
     assert by_case_id["retail_missing_001"]["expected_parse"]["account_name"] == "Harbor Retail Group"
     assert by_case_id["retail_missing_001"]["expected_workflow"]["lead_score_range"] == [62, 78]
     assert by_case_id["retail_missing_001"]["expected_workflow"]["required_task_titles"] == [
-        "confirm budget range",
-        "confirm decision timeline",
+        "Confirm budget range",
+        "Confirm decision timeline",
     ]
     assert by_case_id["retail_missing_001"]["expected_workflow"]["required_risk_flags"] == [
         "missing_required_facts"
     ]
     for case in cases:
         allowed_missing_fact_titles = {
-            "confirm budget range",
-            "confirm decision timeline",
-            "identify decision makers",
-            "schedule qualification follow-up",
-            "clarify qualification gaps",
+            "Confirm budget range",
+            "Confirm decision timeline",
+            "Identify decision makers",
+            "Schedule qualification follow-up",
+            "Clarify qualification gaps",
         }
         for title in case["expected_workflow"]["required_task_titles"]:
-            assert title in case["expected_parse"]["next_steps"] or title.lower() in allowed_missing_fact_titles
+            assert title in case["expected_parse"]["next_steps"] or title in allowed_missing_fact_titles
 
 
 def test_load_golden_cases_raises_when_opportunity_stage_is_invalid(tmp_path):

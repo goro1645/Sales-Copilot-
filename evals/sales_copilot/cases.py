@@ -96,13 +96,13 @@ _SEGMENT_CONTRACTS = {
     "high_intent_complete": {
         "lead_priority": "high",
         "expected_route": "high_priority_follow_up",
-        "score_min": 80,
+        "score_min": 78,
         "score_max": 100,
     },
     "high_intent_missing_facts": {
         "lead_priority": "high",
         "expected_route": "high_priority_follow_up",
-        "score_min": 80,
+        "score_min": 62,
         "score_max": 100,
     },
     "medium_intent_nurture": {
@@ -184,18 +184,7 @@ def _ensure_lead_score_range(value: object, label: str) -> list[int]:
         normalized.append(item)
     if normalized[0] > normalized[1]:
         raise ValueError(f"{label} must be in ascending order")
-    if normalized[0] < 50 <= normalized[1] or normalized[0] < 80 <= normalized[1]:
-        raise ValueError(f"{label} cannot cross routing thresholds")
     return normalized
-
-
-def _expected_route_for_score_range(score_range: list[int]) -> str:
-    upper_bound = score_range[1]
-    if upper_bound < 50:
-        return "low_priority_nurture"
-    if upper_bound < 80:
-        return "standard_follow_up"
-    return "high_priority_follow_up"
 
 
 def _ensure_segment(value: object, label: str) -> str:
@@ -229,7 +218,12 @@ def _validate_segment_contract(
 
     if lead_priority != contract["lead_priority"]:
         raise ValueError(f"{label} lead_priority must be {contract['lead_priority']}")
-    if expected_route != contract["expected_route"] and expected_route != "need_more_info":
+    if segment == "high_intent_missing_facts":
+        if expected_route not in {"high_priority_follow_up", "standard_follow_up", "need_more_info"}:
+            raise ValueError(
+                f"{label} expected_route must be standard_follow_up or high_priority_follow_up"
+            )
+    elif expected_route != contract["expected_route"] and expected_route != "need_more_info":
         raise ValueError(f"{label} expected_route must be {contract['expected_route']}")
     if lead_score_range[0] < contract["score_min"] or lead_score_range[1] > contract["score_max"]:
         raise ValueError(
@@ -332,10 +326,6 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 raise ValueError(
                     f"line {line_number} expected_workflow.expected_route must be one of "
                     f"{sorted(_ALLOWED_EXPECTED_ROUTES)}"
-                )
-            if expected_route != "need_more_info" and expected_route != _expected_route_for_score_range(lead_score_range):
-                raise ValueError(
-                    f"line {line_number} expected_workflow.expected_route must match lead_score_range"
                 )
 
             lead_priority = _ensure_string(

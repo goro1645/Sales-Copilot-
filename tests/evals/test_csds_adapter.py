@@ -58,3 +58,17 @@ def test_load_csds_cases_rejects_missing_parse_fields(tmp_path: Path) -> None:
         assert "expected_parse missing fields" in str(exc)
     else:
         raise AssertionError("expected ValueError for missing parse fields")
+
+
+def test_repo_csds_cases_keep_public_real_metadata_and_minimum_coverage() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    cases_path = repo_root / "evals" / "sales_copilot" / "csds_cases.jsonl"
+
+    cases = load_csds_cases(cases_path)
+
+    assert len(cases) >= 15
+    assert {case["source_dataset"] for case in cases} == {"CSDS"}
+    assert all(case["source_uid"] for case in cases)
+    assert all("Official CSDS" in case["source_note"] for case in cases)
+    assert len({case["case_id"] for case in cases}) == len(cases)
+    assert len({case["source_uid"] for case in cases}) == len(cases)

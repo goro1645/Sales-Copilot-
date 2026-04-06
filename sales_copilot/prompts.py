@@ -29,6 +29,7 @@ def build_meeting_parse_messages(
         "- timeline_signals\n"
         "- competitors\n\n"
         "Field guidance:\n"
+        "- account_name: use the clearest company or account named in the note; when the meeting note does not identify a clearer company or account, use the service account named in the customer profile.\n"
         "- confirmed_needs: the customer questions, requests, or needs raised in the dialogue.\n"
         "- objections: blockers, constraints, or reasons a request cannot proceed as asked.\n"
         "- next_steps: actionable resolutions, instructions, commitments, or handling steps stated in the dialogue.\n"

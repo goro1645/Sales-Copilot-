@@ -47,6 +47,19 @@ def test_build_meeting_parse_messages_defines_next_steps_as_actionable_resolutio
     assert "solutions already provided" in user_prompt
 
 
+def test_build_meeting_parse_messages_defines_account_name_fallback_to_profile_account():
+    messages = build_meeting_parse_messages(
+        customer_profile_text="Source dataset: CSDS. Account name: 京东客服. Dialogue roles: 用户、客服。",
+        meeting_note_text="The user asked how to change the address and whether the coupon would be returned.",
+    )
+
+    user_prompt = messages[1]["content"].lower()
+
+    assert "account_name" in user_prompt
+    assert "service account named in the customer profile" in user_prompt
+    assert "when the meeting note does not identify a clearer company or account" in user_prompt
+
+
 def test_build_lead_scoring_messages_mentions_json_and_input_context():
     assert str(inspect.signature(build_lead_scoring_messages)) == (
         "(*, customer_profile_text: str, meeting_summary: dict, retrieved_docs: list[dict], "

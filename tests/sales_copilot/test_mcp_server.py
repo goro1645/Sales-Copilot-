@@ -38,6 +38,7 @@ def test_mcp_server_list_account_tasks_filters_by_status(tmp_path: Path):
 
     db_path = tmp_path / "sales.db"
     account_id = save_account(db_path, _build_account_record("BluePeak Health"))
+    other_account_id = save_account(db_path, _build_account_record("Fabrikam"))
     meeting_id = save_meeting_record(
         db_path,
         {
@@ -71,6 +72,29 @@ def test_mcp_server_list_account_tasks_filters_by_status(tmp_path: Path):
             "priority": "low",
             "due_at": "2026-04-09",
             "status": "closed",
+        },
+    )
+    other_meeting_id = save_meeting_record(
+        db_path,
+        {
+            "account_id": other_account_id,
+            "meeting_title": "Fabrikam Discovery",
+            "meeting_note_raw": "Other account call.",
+            "meeting_summary_json": "{}",
+            "lead_score": 55,
+            "priority": "medium",
+        },
+    )
+    save_task_record(
+        db_path,
+        {
+            "account_id": other_account_id,
+            "meeting_id": other_meeting_id,
+            "title": "Other open task",
+            "description": "Belongs to another account",
+            "priority": "medium",
+            "due_at": "2026-04-10",
+            "status": "open",
         },
     )
     server = SalesCopilotMCPServer(db_path)
@@ -124,6 +148,7 @@ def test_mcp_server_update_account_stage_updates_account(tmp_path: Path):
 
     db_path = tmp_path / "sales.db"
     account_id = save_account(db_path, _build_account_record("Contoso"))
+    other_account_id = save_account(db_path, _build_account_record("Tailspin"))
     server = SalesCopilotMCPServer(db_path)
 
     result = server.call_tool(
@@ -137,9 +162,46 @@ def test_mcp_server_update_account_stage_updates_account(tmp_path: Path):
     )
 
     account = get_account_by_id(db_path, account_id)
+    other_account = get_account_by_id(db_path, other_account_id)
     assert result["account"]["opportunity_stage"] == "proposal"
     assert account["opportunity_stage"] == "proposal"
     assert account["last_contact_at"] == "2026-04-06"
+    assert other_account["opportunity_stage"] == "discovery"
+
+
+def test_mcp_server_update_account_stage_rejects_missing_account(tmp_path: Path):
+    from sales_copilot.mcp_server import SalesCopilotMCPServer
+
+    server = SalesCopilotMCPServer(tmp_path / "sales.db")
+
+    try:
+        server.call_tool(
+            "update_account_stage",
+            {
+                "account_id": 999,
+                "status": "active",
+                "opportunity_stage": "proposal",
+                "last_contact_at": "2026-04-06",
+            },
+        )
+    except ValueError as exc:
+        assert "does not exist" in str(exc)
+    else:
+        raise AssertionError("Expected missing account update to raise ValueError")
+
+
+def test_mcp_server_rejects_missing_required_arguments(tmp_path: Path):
+    from sales_copilot.mcp_server import SalesCopilotMCPServer
+
+    server = SalesCopilotMCPServer(tmp_path / "sales.db")
+
+    try:
+        server.call_tool("get_account", {})
+    except ValueError as exc:
+        assert "Invalid arguments" in str(exc)
+        assert "account_id" in str(exc)
+    else:
+        raise AssertionError("Expected missing account_id to raise ValueError")
 
 
 def test_mcp_server_rejects_unsupported_tool(tmp_path: Path):

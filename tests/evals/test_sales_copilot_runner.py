@@ -227,7 +227,13 @@ def test_write_report_bundle_writes_json_md_and_jsonl(tmp_path: Path):
     bundle = {
         "summary": {
             "total_cases": 1,
-            "parse": {"json_valid_rate": 1.0, "average_list_field_f1": 1.0},
+            "parse": {
+                "json_valid_rate": 1.0,
+                "list_field_precision": 1.0,
+                "list_field_recall": 1.0,
+                "list_field_f1": 1.0,
+                "average_list_field_f1": 1.0,
+            },
             "workflow": {"workflow_success_rate": 1.0, "route_accuracy": 1.0},
         },
         "case_results": [
@@ -259,6 +265,9 @@ def test_write_report_bundle_writes_json_md_and_jsonl(tmp_path: Path):
     assert "# Sales Copilot Offline Eval Report" in report_markdown
     assert "dataset size" in report_markdown.lower()
     assert "segment distribution" in report_markdown.lower()
+    assert "list_field_precision" in report_markdown
+    assert "list_field_recall" in report_markdown
+    assert "list_field_f1" in report_markdown
     assert "average_list_field_f1" in report_markdown
     assert "route_accuracy" in report_markdown
     assert '"case_id": "case-1"' in case_results_jsonl.read_text(encoding="utf-8")

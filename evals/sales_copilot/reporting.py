@@ -89,7 +89,14 @@ def _build_report_markdown(bundle: dict[str, Any]) -> str:
             "| --- | --- |",
         ]
     )
-    for key in ("json_valid_rate", "average_list_field_f1", "risk_flag_recall"):
+    for key in (
+        "json_valid_rate",
+        "list_field_precision",
+        "list_field_recall",
+        "list_field_f1",
+        "average_list_field_f1",
+        "risk_flag_recall",
+    ):
         lines.append(f"| {key} | {parse_summary.get(key, 'N/A')} |")
     field_exact_match_rate = parse_summary.get("field_exact_match_rate", {})
     if isinstance(field_exact_match_rate, dict):

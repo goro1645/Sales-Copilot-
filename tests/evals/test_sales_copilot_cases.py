@@ -217,8 +217,44 @@ def test_load_golden_cases_allows_medium_nurture_need_more_info_route(tmp_path):
     path = tmp_path / "medium_need_more_info.jsonl"
     path.write_text(
         json.dumps(
+            {
+                "case_id": "medium_need_more_info",
+                "segment": "medium_intent_nurture",
+                "customer_profile_text": "Account: Contoso Widgets\nIndustry: Manufacturing\nCurrent stage: Discovery",
+                "meeting_note_text": "The buyer wants to revisit once they have enough internal context.",
+                "expected_parse": {
+                    "account_name": "Contoso Widgets",
+                    "customer_roles": [],
+                    "confirmed_needs": [],
+                    "budget_signals": [],
+                    "timeline_signals": [],
+                    "next_steps": [],
+                    "competitors": [],
+                },
+                "expected_workflow": {
+                    "lead_score_range": [55, 69],
+                    "lead_priority": "medium",
+                    "opportunity_stage": "discovery",
+                    "expected_route": "need_more_info",
+                    "should_write_crm": True,
+                    "should_generate_tasks": False,
+                    "required_task_titles": [],
+                    "required_risk_flags": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cases = load_golden_cases(path)
+
+    assert cases[0]["expected_workflow"]["expected_route"] == "need_more_info"
+def test_load_golden_cases_raises_when_medium_nurture_need_more_info_has_normal_content(tmp_path):
+    path = tmp_path / "medium_need_more_info_normal_content.jsonl"
+    path.write_text(
+        json.dumps(
             _build_sales_case(
-                "medium_need_more_info",
+                "medium_need_more_info_normal_content",
                 segment="medium_intent_nurture",
                 lead_score_range=[55, 69],
                 lead_priority="medium",
@@ -233,9 +269,8 @@ def test_load_golden_cases_allows_medium_nurture_need_more_info_route(tmp_path):
         encoding="utf-8",
     )
 
-    cases = load_golden_cases(path)
-
-    assert cases[0]["expected_workflow"]["expected_route"] == "need_more_info"
+    with pytest.raises(ValueError, match="need_more_info requires empty structured fields"):
+        load_golden_cases(path)
 
 
 def test_load_golden_cases_raises_when_medium_nurture_need_more_info_uses_high_priority(tmp_path):
@@ -572,31 +607,6 @@ def test_load_golden_cases_raises_when_medium_nurture_pair_is_mismatched_to_prio
 
     with pytest.raises(ValueError, match="allowed lead_priority/expected_route combinations"):
         load_golden_cases(path)
-
-
-def test_load_golden_cases_allows_need_more_info_route(tmp_path):
-    path = tmp_path / "need_more_info.jsonl"
-    path.write_text(
-        json.dumps(
-            _build_sales_case(
-                "need_more_info_case",
-                segment="high_intent_complete",
-                lead_score_range=[90, 100],
-                lead_priority="high",
-                opportunity_stage="proposal",
-                expected_route="need_more_info",
-                should_write_crm=True,
-                should_generate_tasks=False,
-                required_task_titles=[],
-                required_risk_flags=[],
-            )
-        ),
-        encoding="utf-8",
-    )
-
-    cases = load_golden_cases(path)
-
-    assert cases[0]["expected_workflow"]["expected_route"] == "need_more_info"
 
 
 def test_load_golden_cases_raises_when_segment_contract_is_inconsistent(tmp_path):

@@ -127,7 +127,6 @@ _SEGMENT_CONTRACTS = {
                 "score_max": 79,
             },
         ),
-        "fallback_route": "need_more_info",
         "score_min": 35,
         "score_max": 79,
     },
@@ -283,8 +282,7 @@ def _validate_segment_contract(
                 f"({route_band[0]}..{route_band[1]})"
             )
     else:
-        fallback_route = contract.get("fallback_route")
-        if fallback_route is not None and expected_route == fallback_route:
+        if expected_route == "need_more_info":
             if lead_score_range[0] < contract["score_min"] or lead_score_range[1] > contract["score_max"]:
                 raise ValueError(
                     f"{label} lead_score_range must stay within {contract['score_min']}..{contract['score_max']}"
@@ -295,7 +293,6 @@ def _validate_segment_contract(
                     f"{label} lead_score_range must overlap with {expected_route} "
                     f"({route_band[0]}..{route_band[1]})"
                 )
-            matched_combination = True
         else:
             matched_combination = None
             for combination in allowed_combinations:
@@ -349,6 +346,29 @@ def _validate_task_titles(
             continue
         raise ValueError(
             f"{label} required_task_titles must come from expected_parse.next_steps or deterministic missing-facts tasks"
+        )
+
+
+def _validate_need_more_info_parse(
+    *,
+    expected_route: str,
+    expected_parse: ExpectedParse,
+    label: str,
+) -> None:
+    if expected_route != "need_more_info":
+        return
+
+    fields_that_must_be_empty = (
+        "customer_roles",
+        "confirmed_needs",
+        "budget_signals",
+        "timeline_signals",
+        "next_steps",
+    )
+    non_empty_fields = [field for field in fields_that_must_be_empty if expected_parse[field]]
+    if non_empty_fields:
+        raise ValueError(
+            f"{label} need_more_info requires empty structured fields: {', '.join(non_empty_fields)}"
         )
 
 
@@ -481,6 +501,11 @@ def load_golden_cases(path: str | Path) -> list[GoldenCase]:
                 should_generate_tasks=expected_workflow["should_generate_tasks"],
                 required_task_titles=expected_workflow["required_task_titles"],
                 label=f"line {line_number} segment",
+            )
+            _validate_need_more_info_parse(
+                expected_route=expected_workflow["expected_route"],
+                expected_parse=expected_parse,
+                label=f"line {line_number} expected_workflow",
             )
             _validate_task_titles(
                 required_task_titles=expected_workflow["required_task_titles"],

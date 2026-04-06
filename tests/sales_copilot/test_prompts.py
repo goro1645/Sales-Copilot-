@@ -31,6 +31,22 @@ def test_build_meeting_parse_messages_requests_json_and_uses_notes():
     assert "pricing" in messages[1]["content"]
 
 
+def test_build_meeting_parse_messages_defines_next_steps_as_actionable_resolutions():
+    messages = build_meeting_parse_messages(
+        customer_profile_text="Customer support context only.",
+        meeting_note_text="The agent said the unpaid order can be edited directly and the coupon will be returned after cancellation.",
+    )
+
+    user_prompt = messages[1]["content"].lower()
+
+    assert "next_steps" in user_prompt
+    assert "actionable" in user_prompt
+    assert "instructions" in user_prompt
+    assert "commitments" in user_prompt
+    assert "do not leave next_steps empty" in user_prompt
+    assert "solutions already provided" in user_prompt
+
+
 def test_build_lead_scoring_messages_mentions_json_and_input_context():
     assert str(inspect.signature(build_lead_scoring_messages)) == (
         "(*, customer_profile_text: str, meeting_summary: dict, retrieved_docs: list[dict], "

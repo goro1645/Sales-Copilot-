@@ -28,6 +28,12 @@ def build_meeting_parse_messages(
         "- budget_signals\n"
         "- timeline_signals\n"
         "- competitors\n\n"
+        "Field guidance:\n"
+        "- confirmed_needs: the customer questions, requests, or needs raised in the dialogue.\n"
+        "- objections: blockers, constraints, or reasons a request cannot proceed as asked.\n"
+        "- next_steps: actionable resolutions, instructions, commitments, or handling steps stated in the dialogue.\n"
+        "- If the agent already provided a concrete solution or promised handling action, include it in next_steps.\n"
+        "- Do not leave next_steps empty when the note already contains solutions already provided, explicit instructions, or follow-up handling steps.\n\n"
         f"Customer profile:\n{customer_profile_text}\n\n"
         f"Meeting notes:\n{meeting_note_text}"
     )

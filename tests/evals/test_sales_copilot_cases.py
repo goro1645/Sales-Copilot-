@@ -326,6 +326,7 @@ def test_load_golden_cases_allows_spillover_of_three_points(tmp_path):
     cases = load_golden_cases(path)
 
     assert cases[0]["expected_workflow"]["lead_score_range"] == [50, 82]
+    assert cases[0]["expected_parse"]["next_steps"] == []
 
 
 def test_load_golden_cases_allows_two_sided_spillover_within_limit(tmp_path):
@@ -352,6 +353,7 @@ def test_load_golden_cases_allows_two_sided_spillover_within_limit(tmp_path):
     cases = load_golden_cases(path)
 
     assert cases[0]["expected_workflow"]["lead_score_range"] == [49, 81]
+    assert cases[0]["expected_parse"]["next_steps"] == []
 
 
 def test_load_golden_cases_raises_when_spillover_exceeds_three_points(tmp_path):

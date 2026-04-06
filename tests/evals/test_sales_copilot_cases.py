@@ -65,6 +65,12 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
         "healthcare_missing_002",
         "manufacturing_missing_001",
         "retail_missing_001",
+        "retail_nurture_002",
+        "finance_nurture_001",
+        "education_nurture_001",
+        "noise_002",
+        "noise_003",
+        "noise_004",
     ]
     assert by_case_id["high_intent_complete"]["expected_parse"]["account_name"] == "华东制造集团"
     assert by_case_id["high_intent_complete"]["segment"] == "high_intent_complete"
@@ -167,6 +173,31 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
     assert by_case_id["retail_missing_001"]["expected_workflow"]["required_risk_flags"] == [
         "missing_required_facts"
     ]
+    assert by_case_id["retail_nurture_002"]["expected_parse"]["account_name"] == "Northwind Traders"
+    assert by_case_id["retail_nurture_002"]["expected_workflow"]["lead_priority"] == "medium"
+    assert by_case_id["retail_nurture_002"]["expected_workflow"]["opportunity_stage"] == "discovery"
+    assert by_case_id["retail_nurture_002"]["expected_workflow"]["lead_score_range"] == [55, 69]
+    assert by_case_id["retail_nurture_002"]["expected_workflow"]["expected_route"] == "standard_follow_up"
+    assert by_case_id["retail_nurture_002"]["expected_workflow"]["required_task_titles"] == []
+
+    assert by_case_id["finance_nurture_001"]["expected_parse"]["account_name"] == "Meridian Finance"
+    assert by_case_id["finance_nurture_001"]["expected_workflow"]["lead_priority"] == "medium"
+    assert by_case_id["finance_nurture_001"]["expected_workflow"]["lead_score_range"] == [55, 69]
+
+    assert by_case_id["education_nurture_001"]["expected_parse"]["account_name"] == "Summit Education"
+    assert by_case_id["education_nurture_001"]["expected_workflow"]["lead_priority"] == "medium"
+    assert by_case_id["education_nurture_001"]["expected_workflow"]["lead_score_range"] == [55, 69]
+
+    assert by_case_id["noise_002"]["expected_parse"]["account_name"] == "Orchard Foods"
+    assert by_case_id["noise_002"]["expected_workflow"]["lead_score_range"] == [0, 35]
+    assert by_case_id["noise_002"]["expected_workflow"]["expected_route"] == "low_priority_nurture"
+
+    assert by_case_id["noise_003"]["expected_parse"]["account_name"] == "Atlas Print"
+    assert by_case_id["noise_003"]["expected_workflow"]["lead_score_range"] == [0, 35]
+
+    assert by_case_id["noise_004"]["expected_parse"]["account_name"] == "Pineview Hotels"
+    assert by_case_id["noise_004"]["expected_workflow"]["lead_score_range"] == [0, 35]
+
     for case in cases:
         allowed_missing_fact_titles = {
             "Confirm budget range",
@@ -177,6 +208,20 @@ def test_load_golden_cases_reads_repository_cases_with_formal_workflow_contract(
         }
         for title in case["expected_workflow"]["required_task_titles"]:
             assert title in case["expected_parse"]["next_steps"] or title in allowed_missing_fact_titles
+
+
+def test_golden_case_file_has_unique_ids_and_balanced_segment_coverage():
+    cases = load_golden_cases(Path(__file__).resolve().parents[2] / "evals" / "sales_copilot" / "golden_cases.jsonl")
+
+    case_ids = [case["case_id"] for case in cases]
+    segments = [case["segment"] for case in cases]
+
+    assert len(cases) == 16
+    assert len(case_ids) == len(set(case_ids))
+    assert segments.count("high_intent_complete") == 4
+    assert segments.count("high_intent_missing_facts") == 4
+    assert segments.count("medium_intent_nurture") == 4
+    assert segments.count("low_intent_or_noise") == 4
 
 
 def test_load_golden_cases_raises_when_opportunity_stage_is_invalid(tmp_path):

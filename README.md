@@ -2028,6 +2028,15 @@ $env:DEEPSEEK_API_KEY="your-key"
 & 'D:\anaconda\envs\minimind_job_agent\python.exe' -m streamlit run scripts/sales_copilot_web_demo.py
 ```
 
+### Sales Copilot MCP Mode
+
+`Sales Copilot` supports two execution modes:
+
+- `direct`: the workflow writes CRM and task state directly to local SQLite
+- `mcp`: the workflow writes CRM and task state through a local MCP server backed by the same SQLite database
+
+In the Streamlit demo, use the `Execution Mode` selector to switch between `direct` and `mcp`.
+
 Targeted verification:
 
 ```powershell
@@ -2051,6 +2060,23 @@ Use `scripts/run_sales_copilot_eval.py` to run the offline benchmark for regress
   --mode offline
 ```
 
+Run the same offline benchmark in MCP mode:
+
+```powershell
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\run_sales_copilot_eval.py' `
+  --cases 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\golden_cases.jsonl' `
+  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs' `
+  --mode offline `
+  --execution-mode mcp
+```
+
 The command writes `report.json`, `report.md`, and `case_results.jsonl` under the output directory.
 If your local clone or virtual environment lives elsewhere, replace those absolute paths with the ones on your machine.
 
+Recommended local metrics for honest project reporting:
+
+- `workflow_success_rate`
+- `crm_writeback_accuracy`
+- `task_generation_hit_rate`
+- `required_task_hit_rate`
+- `mcp tool success rate`

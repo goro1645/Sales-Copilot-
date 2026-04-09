@@ -142,6 +142,43 @@ def test_hybrid_rerank_reorders_top_k_candidates():
     assert results[0]["rerank_score"] > results[1]["rerank_score"]
 
 
+def test_hybrid_rerank_normalizes_rerank_scores_before_fusion():
+    from sales_copilot.retrieval import FakeEmbedder, hybrid_rerank_retrieve_rows
+    from sales_copilot.reranker import FakeReranker
+
+    rows = [
+        {"id": 1, "chunk_text": "Private deployment with audit logging.", "source_name": "Doc A", "tags_json": "[]"},
+        {"id": 2, "chunk_text": "Private deployment architecture and CRM integration.", "source_name": "Doc B", "tags_json": "[]"},
+    ]
+    embedder = FakeEmbedder(
+        {
+            "private deployment and crm integration": [1.0, 0.0],
+            "Private deployment with audit logging.": [1.0, 0.0],
+            "Private deployment architecture and CRM integration.": [0.9, 0.0],
+        }
+    )
+    reranker = FakeReranker(
+        {
+            ("private deployment and crm integration", "Private deployment with audit logging."): 10.0,
+            ("private deployment and crm integration", "Private deployment architecture and CRM integration."): 11.0,
+        }
+    )
+
+    results = hybrid_rerank_retrieve_rows(
+        "private deployment and crm integration",
+        rows,
+        embedder=embedder,
+        reranker=reranker,
+        top_k=2,
+    )
+
+    assert results[0]["rerank_score_raw"] == 11.0
+    assert results[0]["rerank_score"] == 1.0
+    assert results[1]["rerank_score_raw"] == 10.0
+    assert results[1]["rerank_score"] == 0.0
+    assert results[0]["final_score"] == 0.7 * 1.0 + 0.3 * results[0]["hybrid_score"]
+
+
 def test_rerank_only_can_override_hybrid_score_bias():
     from sales_copilot.retrieval import FakeEmbedder, rerank_only_retrieve_rows
     from sales_copilot.reranker import FakeReranker
@@ -175,6 +212,42 @@ def test_rerank_only_can_override_hybrid_score_bias():
     assert results[0]["source_name"] == "Doc B"
     assert results[0]["retrieval_mode"] == "rerank_only"
     assert results[0]["rerank_score"] > results[1]["rerank_score"]
+
+
+def test_rerank_only_exposes_normalized_rerank_scores():
+    from sales_copilot.retrieval import FakeEmbedder, rerank_only_retrieve_rows
+    from sales_copilot.reranker import FakeReranker
+
+    rows = [
+        {"id": 1, "chunk_text": "Private deployment with audit logging.", "source_name": "Doc A", "tags_json": "[]"},
+        {"id": 2, "chunk_text": "Private deployment architecture and CRM integration.", "source_name": "Doc B", "tags_json": "[]"},
+    ]
+    embedder = FakeEmbedder(
+        {
+            "private deployment and crm integration": [1.0, 0.0],
+            "Private deployment with audit logging.": [1.0, 0.0],
+            "Private deployment architecture and CRM integration.": [0.9, 0.0],
+        }
+    )
+    reranker = FakeReranker(
+        {
+            ("private deployment and crm integration", "Private deployment with audit logging."): -2.0,
+            ("private deployment and crm integration", "Private deployment architecture and CRM integration."): 6.0,
+        }
+    )
+
+    results = rerank_only_retrieve_rows(
+        "private deployment and crm integration",
+        rows,
+        embedder=embedder,
+        reranker=reranker,
+        top_k=2,
+    )
+
+    assert results[0]["rerank_score_raw"] == 6.0
+    assert results[0]["rerank_score"] == 1.0
+    assert results[1]["rerank_score_raw"] == -2.0
+    assert results[1]["rerank_score"] == 0.0
 
 
 def test_hybrid_retrieve_knowledge_chunks_supports_mixed_source_type(tmp_path: Path):

@@ -71,6 +71,17 @@ def _normalize_keyword_scores(rows: list[dict]) -> dict[int, float]:
     return {int(row["id"]): float(row.get("score", 0.0)) / max_score for row in rows if "id" in row}
 
 
+def _normalize_dense_scores(scores: list[float]) -> list[float]:
+    if not scores:
+        return []
+    min_score = min(scores)
+    max_score = max(scores)
+    if max_score == min_score:
+        return [1.0 for _ in scores]
+    scale = max_score - min_score
+    return [(score - min_score) / scale for score in scores]
+
+
 def hybrid_retrieve_rows(query: str, rows: list[dict], *, embedder: Embedder | None, top_k: int = 3) -> list[dict]:
     keyword_rows = keyword_retrieve(query, rows, top_k=max(top_k, len(rows)))
     keyword_score_map = _normalize_keyword_scores(keyword_rows)
@@ -127,15 +138,17 @@ def hybrid_rerank_retrieve_rows(
         return hybrid_rows[:top_k]
 
     pairs = [(query, str(row.get("chunk_text", ""))) for row in hybrid_rows]
-    rerank_scores = reranker.score_pairs(pairs)
+    rerank_scores_raw = [float(score) for score in reranker.score_pairs(pairs)]
+    rerank_scores = _normalize_dense_scores(rerank_scores_raw)
 
     reranked: list[dict] = []
-    for row, rerank_score in zip(hybrid_rows, rerank_scores):
+    for row, rerank_score_raw, rerank_score in zip(hybrid_rows, rerank_scores_raw, rerank_scores):
         hybrid_score = float(row.get("hybrid_score", 0.0))
         final_score = 0.7 * float(rerank_score) + 0.3 * hybrid_score
         reranked.append(
             {
                 **row,
+                "rerank_score_raw": float(rerank_score_raw),
                 "rerank_score": float(rerank_score),
                 "final_score": final_score,
                 "retrieval_mode": "hybrid_rerank",
@@ -162,13 +175,15 @@ def rerank_only_retrieve_rows(
         return hybrid_rows[:top_k]
 
     pairs = [(query, str(row.get("chunk_text", ""))) for row in hybrid_rows]
-    rerank_scores = reranker.score_pairs(pairs)
+    rerank_scores_raw = [float(score) for score in reranker.score_pairs(pairs)]
+    rerank_scores = _normalize_dense_scores(rerank_scores_raw)
 
     reranked: list[dict] = []
-    for row, rerank_score in zip(hybrid_rows, rerank_scores):
+    for row, rerank_score_raw, rerank_score in zip(hybrid_rows, rerank_scores_raw, rerank_scores):
         reranked.append(
             {
                 **row,
+                "rerank_score_raw": float(rerank_score_raw),
                 "rerank_score": float(rerank_score),
                 "retrieval_mode": "rerank_only",
             }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from evals.sales_copilot.retrieval_runner import run_retrieval_benchmark
+from evals.sales_copilot.retrieval_runner import run_dual_path_retrieval_benchmark, run_retrieval_benchmark
+from llm.deepseek_client import DeepSeekClient
 
 
 def _default_cases_path() -> Path:
@@ -19,6 +21,31 @@ def _default_cases_path() -> Path:
 
 
 def _build_report_markdown(payload: dict[str, Any]) -> str:
+    if payload.get("report_kind") == "dual_path":
+        summary = payload.get("summary", {})
+        bucket_summary = payload.get("bucket_summary", {})
+        gap = payload.get("gap", {})
+        lines = [
+            "# Sales Copilot Dual-Path Retrieval Eval Report",
+            "",
+            "## Gold Retrieval",
+            "",
+            json.dumps(summary.get("gold", {}), ensure_ascii=False, indent=2),
+            "",
+            "## Model Retrieval",
+            "",
+            json.dumps(summary.get("model", {}), ensure_ascii=False, indent=2),
+            "",
+            "## Bucket Summary",
+            "",
+            json.dumps(bucket_summary, ensure_ascii=False, indent=2),
+            "",
+            "## Gap Analysis",
+            "",
+            json.dumps(gap, ensure_ascii=False, indent=2),
+        ]
+        return "\n".join(lines)
+
     summary = payload.get("summary", {})
     bucket_summary = payload.get("bucket_summary", {})
     case_results = payload.get("case_results", [])
@@ -97,6 +124,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cases", default=None, help="Path to the retrieval cases JSONL file.")
     parser.add_argument("--db-path", required=True, help="Path to the knowledge base database.")
     parser.add_argument("--output-dir", required=True, help="Directory for timestamped evaluation reports.")
+    parser.add_argument("--benchmark-kind", choices=["single", "dual"], default="single")
+    parser.add_argument("--csds-data-dir", default=os.getenv("CSDS_DATA_DIR", ""))
+    parser.add_argument("--api-base-url", default=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
+    parser.add_argument("--api-model", default=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"))
     return parser
 
 
@@ -106,7 +137,20 @@ def main() -> int:
     db_path = Path(args.db_path)
     output_root = Path(args.output_dir)
 
-    payload = run_retrieval_benchmark(cases_path=cases_path, db_path=db_path)
+    if args.benchmark_kind == "dual":
+        api_key = os.getenv("DEEPSEEK_API_KEY", "")
+        if not api_key:
+            raise SystemExit("Missing DeepSeek API key. Set DEEPSEEK_API_KEY.")
+        if not args.csds_data_dir:
+            raise SystemExit("Missing CSDS data dir. Set --csds-data-dir or CSDS_DATA_DIR.")
+        payload = run_dual_path_retrieval_benchmark(
+            cases_path=cases_path,
+            db_path=db_path,
+            llm_client=DeepSeekClient(api_key=api_key, base_url=args.api_base_url, model=args.api_model),
+            csds_data_dir=args.csds_data_dir,
+        )
+    else:
+        payload = run_retrieval_benchmark(cases_path=cases_path, db_path=db_path)
     report_dir = output_root / dt.datetime.now().strftime("%Y%m%d%H%M%S")
     paths = write_retrieval_report(output_dir=report_dir, payload=payload)
 

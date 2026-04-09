@@ -32,6 +32,10 @@ def _score_value(row: Mapping[str, object], key: str) -> float:
     return float(value)
 
 
+def _rounded_gap(value: float) -> float:
+    return round(value, 6)
+
+
 def _summarize_rows(rows: list[dict[str, object]]) -> dict[str, float]:
     total = len(rows)
     if total == 0:
@@ -67,3 +71,43 @@ def summarize_retrieval_metrics_by_bucket(rows_by_mode: dict[str, list[dict]]) -
         bucketed[mode] = {bucket: _summarize_rows(bucket_rows) for bucket, bucket_rows in mode_buckets.items()}
 
     return bucketed
+
+
+def summarize_dual_path_gap(summary_by_path: dict[str, dict[str, dict[str, float]]]) -> dict[str, dict[str, float]]:
+    gold = summary_by_path.get("gold", {})
+    model = summary_by_path.get("model", {})
+    gap: dict[str, dict[str, float]] = {}
+
+    for mode, gold_metrics in gold.items():
+        model_metrics = model.get(mode, {})
+        gap[mode] = {
+            "recall_at_1_gap": _rounded_gap(gold_metrics.get("recall_at_1", 0.0) - model_metrics.get("recall_at_1", 0.0)),
+            "recall_at_3_gap": _rounded_gap(gold_metrics.get("recall_at_3", 0.0) - model_metrics.get("recall_at_3", 0.0)),
+            "recall_at_5_gap": _rounded_gap(gold_metrics.get("recall_at_5", 0.0) - model_metrics.get("recall_at_5", 0.0)),
+            "mrr_gap": _rounded_gap(gold_metrics.get("mrr", 0.0) - model_metrics.get("mrr", 0.0)),
+        }
+
+    return gap
+
+
+def summarize_dual_path_gap_by_bucket(
+    bucket_summary_by_path: dict[str, dict[str, dict[str, dict[str, float]]]]
+) -> dict[str, dict[str, dict[str, float]]]:
+    gold = bucket_summary_by_path.get("gold", {})
+    model = bucket_summary_by_path.get("model", {})
+    gap: dict[str, dict[str, dict[str, float]]] = {}
+
+    for mode, gold_buckets in gold.items():
+        mode_gap: dict[str, dict[str, float]] = {}
+        model_buckets = model.get(mode, {})
+        for bucket, gold_metrics in gold_buckets.items():
+            model_metrics = model_buckets.get(bucket, {})
+            mode_gap[bucket] = {
+                "recall_at_1_gap": _rounded_gap(gold_metrics.get("recall_at_1", 0.0) - model_metrics.get("recall_at_1", 0.0)),
+                "recall_at_3_gap": _rounded_gap(gold_metrics.get("recall_at_3", 0.0) - model_metrics.get("recall_at_3", 0.0)),
+                "recall_at_5_gap": _rounded_gap(gold_metrics.get("recall_at_5", 0.0) - model_metrics.get("recall_at_5", 0.0)),
+                "mrr_gap": _rounded_gap(gold_metrics.get("mrr", 0.0) - model_metrics.get("mrr", 0.0)),
+            }
+        gap[mode] = mode_gap
+
+    return gap

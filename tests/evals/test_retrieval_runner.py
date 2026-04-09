@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from evals.sales_copilot.retrieval_runner import load_retrieval_cases, run_retrieval_benchmark
+from evals.sales_copilot.retrieval_runner import (
+    load_retrieval_cases,
+    run_dual_path_retrieval_benchmark,
+    run_retrieval_benchmark,
+)
 from sales_copilot.retrieval import FakeEmbedder
 from sales_copilot.reranker import FakeReranker
 from sales_copilot.tools import sample_product_chunks, seed_knowledge_chunks
@@ -56,6 +60,7 @@ def test_load_retrieval_cases_reads_repository_hard_dataset_and_preserves_case_m
     assert sum(case["case_type"] == "product_hard" for case in cases) >= 10
     assert sum(case["case_type"] == "playbook_hard" for case in cases) >= 10
     assert sum(case["case_type"] == "cross_source_confusing" for case in cases) >= 10
+    assert all("gold_parse" in case for case in cases)
 
 
 def test_load_retrieval_cases_rejects_invalid_source_type(tmp_path: Path):
@@ -359,6 +364,89 @@ def test_write_retrieval_report_renders_bucket_summary(tmp_path: Path):
 
     assert "Bucket Summary" in report_md
     assert "cross_source_confusing" in report_md
+
+
+class _FakeLLMClient:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def complete(self, messages, response_format=None):
+        del messages, response_format
+        return json.dumps(self.payload, ensure_ascii=False)
+
+
+def test_run_dual_path_retrieval_benchmark_reports_gold_model_and_gap(tmp_path: Path):
+    db_path = tmp_path / "sales.db"
+    seed_knowledge_chunks(db_path, sample_product_chunks())
+    cases_path = tmp_path / "dual_cases.jsonl"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "case_id": "dual-product",
+                "query": "legacy query",
+                "source_type": "product",
+                "query_origin": "light_rewrite",
+                "case_type": "product_hard",
+                "source_uid": "demo-1",
+                "expected_chunk_ids": [2],
+                "acceptable_chunk_ids": [2],
+                "gold_parse": {
+                    "confirmed_needs": ["private deployment", "audit logging"],
+                    "next_steps": ["schedule technical demo"],
+                    "timeline_signals": [],
+                    "risk_flags": ["security_review"],
+                },
+                "customer_profile_text": "Account: Demo Security Buyer",
+                "meeting_note_text": "The customer asked about private deployment and audit logging, then requested a technical demo.",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    results = run_dual_path_retrieval_benchmark(
+        cases_path=cases_path,
+        db_path=db_path,
+        llm_client=_FakeLLMClient(
+            {
+                "account_name": "Demo Security Buyer",
+                "customer_roles": ["Security Lead"],
+                "confirmed_needs": ["private deployment", "audit logging"],
+                "objections": [],
+                "next_steps": ["schedule technical demo"],
+                "budget_signals": [],
+                "timeline_signals": [],
+                "competitors": [],
+            }
+        ),
+    )
+
+    assert "gold" in results["summary"]
+    assert "model" in results["summary"]
+    assert "overall" in results["gap"]
+    assert "case_results" in results
+    assert results["case_results"][0]["gold"]["query"] == "private deployment audit logging security_review schedule technical demo"
+    assert results["case_results"][0]["model"]["query"] == "private deployment audit logging schedule technical demo"
+
+
+def test_write_retrieval_report_renders_dual_path_sections(tmp_path: Path):
+    output_dir = tmp_path / "dual-outputs"
+    payload = {
+        "report_kind": "dual_path",
+        "summary": {
+            "gold": {"keyword_only": {"recall_at_1": 1.0}},
+            "model": {"keyword_only": {"recall_at_1": 0.5}},
+        },
+        "gap": {"overall": {"keyword_only": {"recall_at_1_gap": 0.5}}},
+        "case_results": [],
+    }
+
+    paths = write_retrieval_report(output_dir=output_dir, payload=payload)
+    report_md = paths["report_md"].read_text(encoding="utf-8")
+
+    assert "Gold Retrieval" in report_md
+    assert "Model Retrieval" in report_md
+    assert "Gap Analysis" in report_md
 
 
 def test_run_retrieval_eval_cli_writes_timestamped_report_dir(monkeypatch, tmp_path: Path):

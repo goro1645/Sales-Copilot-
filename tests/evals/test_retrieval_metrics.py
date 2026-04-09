@@ -1,6 +1,7 @@
 from evals.sales_copilot.retrieval_metrics import (
     recall_at_k,
     reciprocal_rank,
+    summarize_dual_path_gap,
     summarize_retrieval_metrics_by_bucket,
     summarize_retrieval_metrics,
 )
@@ -81,3 +82,21 @@ def test_summarize_retrieval_metrics_by_bucket_separates_case_types():
     assert summary["hybrid"]["product_hard"]["mrr"] == 1.0
     assert summary["hybrid"]["cross_source_confusing"]["recall_at_1"] == 0.0
     assert summary["hybrid"]["cross_source_confusing"]["mrr"] == 0.5
+
+
+def test_summarize_dual_path_gap_subtracts_model_from_gold():
+    gap = summarize_dual_path_gap(
+        {
+            "gold": {
+                "keyword_only": {"recall_at_1": 0.8, "recall_at_3": 1.0, "recall_at_5": 1.0, "mrr": 0.9}
+            },
+            "model": {
+                "keyword_only": {"recall_at_1": 0.5, "recall_at_3": 0.75, "recall_at_5": 1.0, "mrr": 0.7}
+            },
+        }
+    )
+
+    assert gap["keyword_only"]["recall_at_1_gap"] == 0.3
+    assert gap["keyword_only"]["recall_at_3_gap"] == 0.25
+    assert gap["keyword_only"]["recall_at_5_gap"] == 0.0
+    assert gap["keyword_only"]["mrr_gap"] == 0.2

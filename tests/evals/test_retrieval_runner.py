@@ -45,6 +45,19 @@ def test_load_retrieval_cases_reads_repository_dataset_and_preserves_order():
     assert cases[-1]["expected_chunk_ids"] == [6]
 
 
+def test_load_retrieval_cases_reads_repository_hard_dataset_and_preserves_case_mix():
+    path = Path(__file__).resolve().parents[2] / "evals" / "sales_copilot" / "retrieval_cases_csds_hard.jsonl"
+
+    cases = load_retrieval_cases(path)
+
+    assert len(cases) >= 50
+    assert any(case["query_origin"] == "raw_user_phrase" for case in cases)
+    assert any(case["query_origin"] == "light_rewrite" for case in cases)
+    assert sum(case["case_type"] == "product_hard" for case in cases) >= 10
+    assert sum(case["case_type"] == "playbook_hard" for case in cases) >= 10
+    assert sum(case["case_type"] == "cross_source_confusing" for case in cases) >= 10
+
+
 def test_load_retrieval_cases_rejects_invalid_source_type(tmp_path: Path):
     path = tmp_path / "bad_source_type.jsonl"
     path.write_text(
@@ -237,6 +250,81 @@ def test_run_retrieval_benchmark_reports_hybrid_rerank_mode(tmp_path: Path):
     assert results["case_results"][0]["modes"]["hybrid_rerank"]["ranked_chunk_ids"][0] == 2
 
 
+def test_run_retrieval_benchmark_includes_bucket_summary(tmp_path: Path):
+    db_path = tmp_path / "sales.db"
+    seed_knowledge_chunks(db_path, sample_product_chunks())
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(
+        "\n".join(
+            [
+                '{"case_id":"product_case","query":"account memory and tracked follow-up actions","query_origin":"light_rewrite","source_type":"product","case_type":"product_hard","expected_chunk_ids":[1]}',
+                '{"case_id":"confusing_case","query":"private deployment and crm integration","query_origin":"light_rewrite","source_type":"product","case_type":"cross_source_confusing","expected_chunk_ids":[2],"acceptable_chunk_ids":[2,3]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    embedder = FakeEmbedder(
+        {
+            "account memory and tracked follow-up actions": [1.0, 0.0],
+            "private deployment and crm integration": [1.0, 0.0],
+            "Sales Copilot helps account teams capture meeting notes, keep account memory fresh, and turn follow-up actions into tracked work.\n\nThe workflow is deterministic and storage-backed, so the same inputs always produce the same outputs.": [
+                0.6,
+                0.0,
+            ],
+            "Deployment options include private deployment for security-sensitive teams, plus standard shared deployment for lighter use cases.\n\nSecurity teams often ask about SSO, audit logging, and how customer data is isolated.": [
+                0.95,
+                0.0,
+            ],
+            "CRM sync writes account stage changes, meeting summaries, and next-step notes back through the storage layer.\n\nThis keeps the sales record consistent without needing model calls.": [
+                0.90,
+                0.0,
+            ],
+        }
+    )
+    reranker = FakeReranker(
+        {
+            (
+                "account memory and tracked follow-up actions",
+                "Sales Copilot helps account teams capture meeting notes, keep account memory fresh, and turn follow-up actions into tracked work.\n\nThe workflow is deterministic and storage-backed, so the same inputs always produce the same outputs.",
+            ): 0.95,
+            (
+                "account memory and tracked follow-up actions",
+                "Deployment options include private deployment for security-sensitive teams, plus standard shared deployment for lighter use cases.\n\nSecurity teams often ask about SSO, audit logging, and how customer data is isolated.",
+            ): 0.10,
+            (
+                "account memory and tracked follow-up actions",
+                "CRM sync writes account stage changes, meeting summaries, and next-step notes back through the storage layer.\n\nThis keeps the sales record consistent without needing model calls.",
+            ): 0.20,
+            (
+                "private deployment and crm integration",
+                "Deployment options include private deployment for security-sensitive teams, plus standard shared deployment for lighter use cases.\n\nSecurity teams often ask about SSO, audit logging, and how customer data is isolated.",
+            ): 0.95,
+            (
+                "private deployment and crm integration",
+                "CRM sync writes account stage changes, meeting summaries, and next-step notes back through the storage layer.\n\nThis keeps the sales record consistent without needing model calls.",
+            ): 0.80,
+            (
+                "private deployment and crm integration",
+                "Sales Copilot helps account teams capture meeting notes, keep account memory fresh, and turn follow-up actions into tracked work.\n\nThe workflow is deterministic and storage-backed, so the same inputs always produce the same outputs.",
+            ): 0.05,
+        }
+    )
+
+    results = run_retrieval_benchmark(
+        cases_path=cases_path,
+        db_path=db_path,
+        embedder=embedder,
+        reranker=reranker,
+    )
+
+    assert "bucket_summary" in results
+    assert "hybrid_rerank" in results["bucket_summary"]
+    assert "product_hard" in results["bucket_summary"]["hybrid_rerank"]
+    assert "cross_source_confusing" in results["bucket_summary"]["hybrid_rerank"]
+
+
 def test_write_retrieval_report_creates_report_files(tmp_path: Path):
     output_dir = tmp_path / "outputs"
     payload = {
@@ -252,6 +340,25 @@ def test_write_retrieval_report_creates_report_files(tmp_path: Path):
     assert paths["report_json"].parent == output_dir
     assert paths["report_md"].parent == output_dir
     assert paths["case_results_jsonl"].parent == output_dir
+
+
+def test_write_retrieval_report_renders_bucket_summary(tmp_path: Path):
+    output_dir = tmp_path / "outputs"
+    payload = {
+        "summary": {"hybrid_rerank": {"recall_at_1": 0.9}},
+        "bucket_summary": {
+            "hybrid_rerank": {
+                "cross_source_confusing": {"recall_at_1": 0.8, "mrr": 0.85}
+            }
+        },
+        "case_results": [],
+    }
+
+    paths = write_retrieval_report(output_dir=output_dir, payload=payload)
+    report_md = paths["report_md"].read_text(encoding="utf-8")
+
+    assert "Bucket Summary" in report_md
+    assert "cross_source_confusing" in report_md
 
 
 def test_run_retrieval_eval_cli_writes_timestamped_report_dir(monkeypatch, tmp_path: Path):

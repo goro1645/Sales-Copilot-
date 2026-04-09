@@ -140,3 +140,36 @@ def test_hybrid_rerank_reorders_top_k_candidates():
     assert results[0]["source_name"] == "Doc B"
     assert results[0]["retrieval_mode"] == "hybrid_rerank"
     assert results[0]["rerank_score"] > results[1]["rerank_score"]
+
+
+def test_hybrid_retrieve_knowledge_chunks_supports_mixed_source_type(tmp_path: Path):
+    from sales_copilot.retrieval import FakeEmbedder, hybrid_retrieve_knowledge_chunks
+    from sales_copilot.tools import sample_playbook_chunks, sample_product_chunks, seed_knowledge_chunks
+
+    db_path = tmp_path / "sales.db"
+    seed_knowledge_chunks(db_path, sample_product_chunks() + sample_playbook_chunks())
+
+    embedder = FakeEmbedder(
+        {
+            "private deployment and security checklist": [1.0, 0.0],
+            "Sales Copilot helps account teams capture meeting notes, keep account memory fresh, and turn follow-up actions into tracked work.\n\nThe workflow is deterministic and storage-backed, so the same inputs always produce the same outputs.": [0.2, 0.0],
+            "Deployment options include private deployment for security-sensitive teams, plus standard shared deployment for lighter use cases.\n\nSecurity teams often ask about SSO, audit logging, and how customer data is isolated.": [0.95, 0.0],
+            "CRM sync writes account stage changes, meeting summaries, and next-step notes back through the storage layer.\n\nThis keeps the sales record consistent without needing model calls.": [0.6, 0.0],
+            "Start discovery by confirming the account's top two pain points, the current workflow, and who owns the decision.\n\nWrite the confirmed needs in short phrases so the account memory stays readable.": [0.3, 0.0],
+            "When a customer raises security review concerns, answer with deployment controls, SSO support, and audit evidence.\n\nThen offer a technical demo and a checklist for their security team.": [0.9, 0.0],
+            "If the deal is moving forward, create a clear next step: send proposal, schedule demo, or book procurement review.\n\nOpen tasks should always point to one owner and one due date.": [0.4, 0.0],
+        }
+    )
+
+    results = hybrid_retrieve_knowledge_chunks(
+        db_path,
+        source_type="mixed",
+        query="private deployment and security checklist",
+        embedder=embedder,
+        top_k=3,
+    )
+
+    result_source_types = {row["source_type"] for row in results}
+
+    assert "product" in result_source_types
+    assert "playbook" in result_source_types

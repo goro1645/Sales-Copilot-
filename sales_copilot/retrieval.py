@@ -149,12 +149,13 @@ def hybrid_rerank_retrieve_rows(
 def hybrid_retrieve_knowledge_chunks(
     db_path,
     *,
-    source_type: str,
+    source_type: str | None,
     query: str,
     embedder: Embedder | None | object = _USE_DEFAULT_EMBEDDER,
     top_k: int = 3,
 ) -> list[dict]:
-    rows = storage.list_knowledge_chunks(db_path, source_type=source_type)
+    storage_source_type = None if source_type in (None, "mixed") else source_type
+    rows = storage.list_knowledge_chunks(db_path, source_type=storage_source_type)
     active_embedder = load_default_embedder() if embedder is _USE_DEFAULT_EMBEDDER else embedder
     if active_embedder is None:
         return hybrid_retrieve_rows(query, rows, embedder=None, top_k=top_k)
@@ -201,14 +202,15 @@ def hybrid_retrieve_knowledge_chunks(
 def hybrid_rerank_knowledge_chunks(
     db_path,
     *,
-    source_type: str,
+    source_type: str | None,
     query: str,
     embedder: Embedder | None | object = _USE_DEFAULT_EMBEDDER,
     reranker: Reranker | None | object = _USE_DEFAULT_RERANKER,
     top_k: int = 3,
     rerank_candidate_k: int = 10,
 ) -> list[dict]:
-    rows = storage.list_knowledge_chunks(db_path, source_type=source_type)
+    storage_source_type = None if source_type in (None, "mixed") else source_type
+    rows = storage.list_knowledge_chunks(db_path, source_type=storage_source_type)
     active_embedder = load_default_embedder() if embedder is _USE_DEFAULT_EMBEDDER else embedder
     active_reranker = load_default_reranker() if reranker is _USE_DEFAULT_RERANKER else reranker
     return hybrid_rerank_retrieve_rows(

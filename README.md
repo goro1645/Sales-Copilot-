@@ -60,6 +60,15 @@ Metrics:
 - `Recall@5`
 - `MRR`
 
+There are now two retrieval case sets:
+
+- `retrieval_cases.jsonl`
+  - small sanity benchmark for baseline regression checks
+- `retrieval_cases_csds_hard.jsonl`
+  - `CSDS`-derived hard benchmark built from public real customer-service phrasing plus manual labels
+  - includes `product_hard`, `playbook_hard`, and `cross_source_confusing` buckets
+  - designed to show whether `hybrid_rerank` improves top-rank ordering over plain `hybrid`
+
 Run:
 
 ```powershell
@@ -67,6 +76,15 @@ python scripts/run_sales_copilot_retrieval_eval.py `
   --cases evals/sales_copilot/retrieval_cases.jsonl `
   --db-path data/sales_copilot/sales_copilot.db `
   --output-dir evals/sales_copilot/outputs_retrieval
+```
+
+Run the CSDS-derived hard set:
+
+```powershell
+python scripts/run_sales_copilot_retrieval_eval.py `
+  --cases evals/sales_copilot/retrieval_cases_csds_hard.jsonl `
+  --db-path data/sales_copilot/sales_copilot.db `
+  --output-dir evals/sales_copilot/outputs_retrieval_hard
 ```
 
 ## System Design

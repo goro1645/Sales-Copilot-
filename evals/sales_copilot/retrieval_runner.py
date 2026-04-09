@@ -7,6 +7,7 @@ from typing import TypedDict, cast
 from evals.sales_copilot.retrieval_metrics import (
     recall_at_k,
     reciprocal_rank,
+    summarize_retrieval_metrics_by_bucket,
     summarize_retrieval_metrics,
 )
 from sales_copilot import storage
@@ -18,7 +19,11 @@ class RetrievalCase(TypedDict):
     case_id: str
     query: str
     source_type: str
+    query_origin: str
+    case_type: str
+    source_uid: str
     expected_chunk_ids: list[int]
+    acceptable_chunk_ids: list[int]
     notes: str
 
 
@@ -34,14 +39,20 @@ class RetrievalCaseResult(TypedDict):
     case_id: str
     query: str
     source_type: str
+    query_origin: str
+    case_type: str
+    source_uid: str
     expected_chunk_ids: list[int]
+    acceptable_chunk_ids: list[int]
     notes: str
     modes: dict[str, RetrievalModeResult]
 
 
 _DEFAULT_TOP_K = 5
 _TOP_LEVEL_FIELDS = ("case_id", "query", "source_type", "expected_chunk_ids")
-_ALLOWED_SOURCE_TYPES = {"product", "playbook"}
+_ALLOWED_SOURCE_TYPES = {"product", "playbook", "mixed"}
+_ALLOWED_QUERY_ORIGINS = {"raw_user_phrase", "light_rewrite"}
+_ALLOWED_CASE_TYPES = {"product_hard", "playbook_hard", "cross_source_confusing"}
 _USE_DEFAULT_EMBEDDER = object()
 
 
@@ -62,6 +73,13 @@ def _ensure_source_type(value: object, label: str) -> str:
     if source_type not in _ALLOWED_SOURCE_TYPES:
         raise ValueError(f"{label} must be one of {sorted(_ALLOWED_SOURCE_TYPES)}")
     return source_type
+
+
+def _ensure_choice(value: object, label: str, allowed: set[str]) -> str:
+    text = _ensure_string(value, label)
+    if text not in allowed:
+        raise ValueError(f"{label} must be one of {sorted(allowed)}")
+    return text
 
 
 def _ensure_expected_chunk_ids(value: object, label: str) -> list[int]:
@@ -87,7 +105,7 @@ def load_retrieval_cases(path: str | Path) -> list[RetrievalCase]:
     seen_case_ids: set[str] = set()
     file_path = Path(path)
 
-    with file_path.open("r", encoding="utf-8") as handle:
+    with file_path.open("r", encoding="utf-8-sig") as handle:
         for line_number, raw_line in enumerate(handle, start=1):
             line = raw_line.strip()
             if not line:
@@ -110,6 +128,24 @@ def load_retrieval_cases(path: str | Path) -> list[RetrievalCase]:
                 top_level["expected_chunk_ids"],
                 f"line {line_number} expected_chunk_ids",
             )
+            query_origin = _ensure_choice(
+                top_level.get("query_origin", "light_rewrite"),
+                f"line {line_number} query_origin",
+                _ALLOWED_QUERY_ORIGINS,
+            )
+            case_type = _ensure_choice(
+                top_level.get(
+                    "case_type",
+                    "product_hard" if source_type == "product" else "playbook_hard",
+                ),
+                f"line {line_number} case_type",
+                _ALLOWED_CASE_TYPES,
+            )
+            source_uid = _ensure_string(top_level.get("source_uid", case_id), f"line {line_number} source_uid")
+            acceptable_chunk_ids = _ensure_expected_chunk_ids(
+                top_level.get("acceptable_chunk_ids", expected_chunk_ids),
+                f"line {line_number} acceptable_chunk_ids",
+            )
 
             notes = top_level.get("notes", "")
             if notes == "":
@@ -124,7 +160,11 @@ def load_retrieval_cases(path: str | Path) -> list[RetrievalCase]:
                         "case_id": case_id,
                         "query": query,
                         "source_type": source_type,
+                        "query_origin": query_origin,
+                        "case_type": case_type,
+                        "source_uid": source_uid,
                         "expected_chunk_ids": expected_chunk_ids,
+                        "acceptable_chunk_ids": acceptable_chunk_ids,
                         "notes": normalized_notes,
                     },
                 )
@@ -134,7 +174,8 @@ def load_retrieval_cases(path: str | Path) -> list[RetrievalCase]:
 
 
 def _keyword_only_retrieve(db_path, *, source_type: str, query: str, top_k: int = _DEFAULT_TOP_K) -> list[dict]:
-    rows = storage.list_knowledge_chunks(db_path, source_type=source_type)
+    storage_source_type = None if source_type == "mixed" else source_type
+    rows = storage.list_knowledge_chunks(db_path, source_type=storage_source_type)
     return keyword_retrieve(query, rows, top_k=top_k)
 
 
@@ -199,18 +240,21 @@ def run_retrieval_benchmark(
         rows_by_mode["keyword_only"].append(
             {
                 "case_id": case["case_id"],
+                "case_type": case["case_type"],
                 **keyword_metrics,
             }
         )
         rows_by_mode["hybrid"].append(
             {
                 "case_id": case["case_id"],
+                "case_type": case["case_type"],
                 **hybrid_metrics,
             }
         )
         rows_by_mode["hybrid_rerank"].append(
             {
                 "case_id": case["case_id"],
+                "case_type": case["case_type"],
                 **hybrid_rerank_metrics,
             }
         )
@@ -222,7 +266,11 @@ def run_retrieval_benchmark(
                     "case_id": case["case_id"],
                     "query": case["query"],
                     "source_type": case["source_type"],
+                    "query_origin": case["query_origin"],
+                    "case_type": case["case_type"],
+                    "source_uid": case["source_uid"],
                     "expected_chunk_ids": case["expected_chunk_ids"],
+                    "acceptable_chunk_ids": case["acceptable_chunk_ids"],
                     "notes": case["notes"],
                     "modes": {
                         "keyword_only": keyword_metrics,
@@ -234,7 +282,9 @@ def run_retrieval_benchmark(
         )
 
     summary = summarize_retrieval_metrics(rows_by_mode)
+    bucket_summary = summarize_retrieval_metrics_by_bucket(rows_by_mode)
     return {
         "summary": summary,
+        "bucket_summary": bucket_summary,
         "case_results": case_results,
     }

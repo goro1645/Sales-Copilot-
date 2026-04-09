@@ -51,6 +51,7 @@ It compares:
 
 - `keyword_only`
 - `hybrid`
+- `hybrid_rerank`
 
 Metrics:
 
@@ -103,6 +104,21 @@ To rebuild cached embeddings:
 ```powershell
 python scripts/rebuild_sales_copilot_embeddings.py --db-path data/sales_copilot/sales_copilot.db
 ```
+
+### Cross-Encoder Reranker
+
+Sales Copilot now also supports a local second-stage reranker.
+
+- first-stage recall remains `keyword_only` or `hybrid`
+- second-stage reranking uses a lightweight local cross-encoder
+- benchmark mode name: `hybrid_rerank`
+
+This keeps retrieval architecture explicit:
+
+- recall finds the candidate set
+- reranking improves top-rank ordering inside that candidate set
+
+The reranker is optional at runtime and falls back to plain `hybrid` if the local model cannot be loaded.
 
 ### MCP Tool Layer
 

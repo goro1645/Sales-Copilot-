@@ -208,3 +208,17 @@ def test_hybrid_retrieve_knowledge_chunks_supports_mixed_source_type(tmp_path: P
 
     assert "product" in result_source_types
     assert "playbook" in result_source_types
+
+
+def test_default_reranker_model_name_is_bge_v2_m3():
+    from sales_copilot.reranker import get_default_reranker_model_name
+
+    assert get_default_reranker_model_name() == "BAAI/bge-reranker-v2-m3"
+
+
+def test_default_reranker_model_name_honors_env_override(monkeypatch):
+    from sales_copilot.reranker import get_default_reranker_model_name
+
+    monkeypatch.setenv("SALES_COPILOT_RERANKER_MODEL", "local/demo-reranker")
+
+    assert get_default_reranker_model_name() == "local/demo-reranker"

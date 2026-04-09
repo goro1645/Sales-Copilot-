@@ -160,12 +160,12 @@ def test_run_retrieval_benchmark_defaults_to_production_hybrid_path(tmp_path: Pa
 
     monkeypatch.setattr("evals.sales_copilot.retrieval_runner.hybrid_retrieve_knowledge_chunks", fake_hybrid_retrieve_knowledge_chunks)
 
-    results = run_retrieval_benchmark(cases_path=cases_path, db_path=db_path)
+    results = run_retrieval_benchmark(cases_path=cases_path, db_path=db_path, embedder=None, reranker=None)
 
     assert captured["db_path"] == db_path
     assert captured["source_type"] == "product"
     assert captured["query"] == "account memory and tracked follow-up actions"
-    assert captured["embedder"] is marker
+    assert captured["embedder"] is None
     assert results["case_results"][0]["modes"]["keyword_only"]["ranked_chunk_ids"][0] == 1
     assert results["case_results"][0]["modes"]["hybrid"]["ranked_chunk_ids"] == [2, 1]
 
@@ -201,6 +201,7 @@ def test_run_retrieval_benchmark_accepts_injected_embedder_and_changes_hybrid_ra
         cases_path=cases_path,
         db_path=db_path,
         embedder=embedder,
+        reranker=None,
     )
 
     assert "keyword_only" in results["summary"]
@@ -298,6 +299,42 @@ def test_run_retrieval_benchmark_reports_rerank_only_mode(tmp_path: Path):
 
     assert "rerank_only" in results["summary"]
     assert results["case_results"][0]["modes"]["rerank_only"]["ranked_chunk_ids"][0] == 2
+
+
+def test_run_retrieval_benchmark_records_active_reranker_model(tmp_path: Path):
+    db_path = tmp_path / "sales.db"
+    seed_knowledge_chunks(db_path, sample_product_chunks())
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(
+        '{"case_id":"product_deployment","query":"private deployment","source_type":"product","expected_chunk_ids":[2]}\n',
+        encoding="utf-8",
+    )
+    reranker = FakeReranker(
+        {
+            (
+                "private deployment",
+                "Sales Copilot helps account teams capture meeting notes, keep account memory fresh, and turn follow-up actions into tracked work.\n\nThe workflow is deterministic and storage-backed, so the same inputs always produce the same outputs.",
+            ): 0.1,
+            (
+                "private deployment",
+                "Deployment options include private deployment for security-sensitive teams, plus standard shared deployment for lighter use cases.\n\nSecurity teams often ask about SSO, audit logging, and how customer data is isolated.",
+            ): 0.9,
+            (
+                "private deployment",
+                "CRM sync writes account stage changes, meeting summaries, and next-step notes back through the storage layer.\n\nThis keeps the sales record consistent without needing model calls.",
+            ): 0.2,
+        },
+        model_name="local/demo-reranker",
+    )
+
+    results = run_retrieval_benchmark(
+        cases_path=cases_path,
+        db_path=db_path,
+        embedder=None,
+        reranker=reranker,
+    )
+
+    assert results["config"]["reranker_model"] == "local/demo-reranker"
 
 
 def test_run_retrieval_benchmark_includes_bucket_summary(tmp_path: Path):
@@ -411,6 +448,21 @@ def test_write_retrieval_report_renders_bucket_summary(tmp_path: Path):
     assert "cross_source_confusing" in report_md
 
 
+def test_write_retrieval_report_renders_active_reranker_model(tmp_path: Path):
+    output_dir = tmp_path / "outputs"
+    payload = {
+        "config": {"reranker_model": "BAAI/bge-reranker-v2-m3"},
+        "summary": {"hybrid_rerank": {"recall_at_1": 0.9}},
+        "case_results": [],
+    }
+
+    paths = write_retrieval_report(output_dir=output_dir, payload=payload)
+    report_md = paths["report_md"].read_text(encoding="utf-8")
+
+    assert "Reranker Model" in report_md
+    assert "BAAI/bge-reranker-v2-m3" in report_md
+
+
 class _FakeLLMClient:
     def __init__(self, payload: dict):
         self.payload = payload
@@ -464,6 +516,8 @@ def test_run_dual_path_retrieval_benchmark_reports_gold_model_and_gap(tmp_path: 
                 "competitors": [],
             }
         ),
+        embedder=None,
+        reranker=None,
     )
 
     assert "gold" in results["summary"]

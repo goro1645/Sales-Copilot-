@@ -17,10 +17,12 @@ from evals.sales_copilot.retrieval_metrics import (
 )
 from sales_copilot import storage
 from sales_copilot.retrieval import (
+    _USE_DEFAULT_RERANKER,
     hybrid_retrieve_knowledge_chunks,
     hybrid_rerank_knowledge_chunks,
     rerank_only_knowledge_chunks,
 )
+from sales_copilot.reranker import get_default_reranker_model_name
 from sales_copilot.tools import keyword_retrieve
 
 
@@ -403,7 +405,7 @@ def run_retrieval_benchmark(
     db_path,
     top_k: int = _DEFAULT_TOP_K,
     embedder: object = _USE_DEFAULT_EMBEDDER,
-    reranker: object | None = None,
+    reranker: object | None = _USE_DEFAULT_RERANKER,
 ) -> dict:
     cases = load_retrieval_cases(cases_path)
 
@@ -450,6 +452,9 @@ def run_retrieval_benchmark(
     summary = summarize_retrieval_metrics(rows_by_mode)
     bucket_summary = summarize_retrieval_metrics_by_bucket(rows_by_mode)
     return {
+        "config": {
+            "reranker_model": _resolve_reranker_model_name(reranker),
+        },
         "summary": summary,
         "bucket_summary": bucket_summary,
         "case_results": case_results,
@@ -511,6 +516,17 @@ def _rows_by_mode_template() -> dict[str, list[dict[str, object]]]:
     return {"keyword_only": [], "hybrid": [], "hybrid_rerank": [], "rerank_only": []}
 
 
+def _resolve_reranker_model_name(reranker: object | None) -> str | None:
+    if reranker is _USE_DEFAULT_RERANKER:
+        return get_default_reranker_model_name()
+    if reranker is None:
+        return None
+    model_name = getattr(reranker, "model_name", None)
+    if isinstance(model_name, str) and model_name.strip():
+        return model_name
+    return None
+
+
 def run_dual_path_retrieval_benchmark(
     *,
     cases_path: str | Path,
@@ -519,7 +535,7 @@ def run_dual_path_retrieval_benchmark(
     csds_data_dir: str | Path | None = None,
     top_k: int = _DEFAULT_TOP_K,
     embedder: object = _USE_DEFAULT_EMBEDDER,
-    reranker: object | None = None,
+    reranker: object | None = _USE_DEFAULT_RERANKER,
 ) -> dict[str, Any]:
     cases = load_retrieval_cases(cases_path)
     csds_lookup = _load_csds_case_lookup(csds_data_dir) if csds_data_dir else None
@@ -607,6 +623,9 @@ def run_dual_path_retrieval_benchmark(
     }
     return {
         "report_kind": "dual_path",
+        "config": {
+            "reranker_model": _resolve_reranker_model_name(reranker),
+        },
         "summary": summary_by_path,
         "bucket_summary": bucket_summary_by_path,
         "gap": {

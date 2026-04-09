@@ -21,12 +21,23 @@ def _default_cases_path() -> Path:
 
 
 def _build_report_markdown(payload: dict[str, Any]) -> str:
+    config = payload.get("config", {})
+    reranker_model = None
+    if isinstance(config, dict):
+        candidate = config.get("reranker_model")
+        if isinstance(candidate, str) and candidate.strip():
+            reranker_model = candidate.strip()
+
     if payload.get("report_kind") == "dual_path":
         summary = payload.get("summary", {})
         bucket_summary = payload.get("bucket_summary", {})
         gap = payload.get("gap", {})
         lines = [
             "# Sales Copilot Dual-Path Retrieval Eval Report",
+            "",
+            "## Config",
+            "",
+            f"- Reranker Model: `{reranker_model or 'none'}`",
             "",
             "## Gold Retrieval",
             "",
@@ -51,6 +62,10 @@ def _build_report_markdown(payload: dict[str, Any]) -> str:
     case_results = payload.get("case_results", [])
     lines = [
         "# Sales Copilot Retrieval Eval Report",
+        "",
+        "## Config",
+        "",
+        f"- Reranker Model: `{reranker_model or 'none'}`",
         "",
         "## Summary",
         "",

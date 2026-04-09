@@ -43,6 +43,31 @@ This evaluation is used to validate structured extraction quality on public real
 
 Workflow behaviors such as route selection, CRM write-back, and task creation are evaluated separately on self-built golden cases, because public customer-service corpora do not provide direct labels for sales workflow execution.
 
+### Retrieval Benchmark
+
+Sales Copilot includes a dedicated retrieval benchmark for the local product/playbook knowledge base.
+
+It compares:
+
+- `keyword_only`
+- `hybrid`
+
+Metrics:
+
+- `Recall@1`
+- `Recall@3`
+- `Recall@5`
+- `MRR`
+
+Run:
+
+```powershell
+python scripts/run_sales_copilot_retrieval_eval.py `
+  --cases evals/sales_copilot/retrieval_cases.jsonl `
+  --db-path data/sales_copilot/sales_copilot.db `
+  --output-dir evals/sales_copilot/outputs_retrieval
+```
+
 ## System Design
 
 ### Workflow Layer
@@ -63,6 +88,22 @@ The project currently uses `DeepSeek API` for structured parsing and follow-up g
 
 - `sales_copilot/prompts.py`
 
+### Hybrid Retrieval
+
+Sales Copilot now supports hybrid retrieval for product knowledge and sales playbook chunks.
+
+- Vector similarity is provided by `sentence-transformers`
+- Keyword retrieval remains as a deterministic fallback
+- Cached embeddings are stored in SQLite through `knowledge_chunk_embeddings`
+- The workflow demo path loads the default embedder through `sales_copilot/runner.py`
+- Direct graph tests can still force keyword-only retrieval to keep regression runs stable
+
+To rebuild cached embeddings:
+
+```powershell
+python scripts/rebuild_sales_copilot_embeddings.py --db-path data/sales_copilot/sales_copilot.db
+```
+
 ### MCP Tool Layer
 
 The local MCP-backed CRM tool path is used for:
@@ -73,6 +114,27 @@ The local MCP-backed CRM tool path is used for:
 - account stage/status update
 
 This makes the agent easier to explain as an execution-oriented system rather than a text-only assistant.
+
+### stdio MCP Server
+
+The repository now also includes a real `stdio` MCP server entrypoint for the CRM/Tasks tool surface:
+
+- `sales_copilot/mcp_stdio_server.py`
+- `scripts/run_sales_copilot_mcp_server.py`
+
+The exposed tools are:
+
+- `get_account`
+- `list_account_tasks`
+- `create_task`
+- `update_account_stage`
+
+This path provides:
+
+- tool discovery
+- tool schema
+- standard tool invocation
+- real client-server validation over `stdio`
 
 ### Local Workbench
 
@@ -102,6 +164,21 @@ $env:DEEPSEEK_API_KEY="your_key"
 python -m streamlit run scripts/sales_copilot_web_demo.py
 ```
 
+### 2.5 Run the DeepSeek Streaming Tool-Call Demo
+
+This repository also includes a standalone DeepSeek official SSE demo that:
+
+- streams normal text deltas
+- streams `tool_calls`
+- executes local CRM/knowledge-style tools after streamed tool completion
+- sends the tool result back for a second streamed answer
+
+Run:
+
+```powershell
+python scripts/deepseek_stream_tool_demo.py
+```
+
 ### 3. Run CSDS Evaluation
 
 For the official `CSDS` dataset:
@@ -115,11 +192,33 @@ python scripts/run_sales_copilot_eval.py `
   --mode offline
 ```
 
+### 4. Run the stdio MCP Server
+
+Install the MCP SDK from the official PyPI index instead of the Tsinghua mirror if your network path is international:
+
+```powershell
+python -m pip install --index-url https://pypi.org/simple mcp
+```
+
+Then start the MCP server:
+
+```powershell
+python scripts/run_sales_copilot_mcp_server.py --db-path data/sales_copilot/sales_copilot.db
+```
+
+Notes:
+
+- The MCP SDK is treated as an optional runtime dependency for the stdio server path.
+- We do not force it into the main app startup path, so the existing Streamlit/FastAPI flows stay isolated from MCP transport concerns.
+- In the validated local environment, `mcp` works with `starlette==0.46.2`; avoid blindly upgrading `starlette` to `1.x` if you still rely on `fastapi==0.115.12`.
+
 ## Repository Map
 
 - `sales_copilot/`: workflow, prompts, storage, MCP integration
+- `sales_copilot/mcp_stdio_server.py`: stdio MCP server wrapper
 - `scripts/sales_copilot_web_demo.py`: local Streamlit demo
 - `scripts/run_sales_copilot_eval.py`: offline evaluation entrypoint
+- `scripts/run_sales_copilot_mcp_server.py`: stdio MCP server entrypoint
 - `evals/sales_copilot/`: adapters, metrics, runners, evaluation outputs
 
 ## Why This Repo Still Contains MiniMind

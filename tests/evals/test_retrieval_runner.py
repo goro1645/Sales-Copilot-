@@ -255,6 +255,51 @@ def test_run_retrieval_benchmark_reports_hybrid_rerank_mode(tmp_path: Path):
     assert results["case_results"][0]["modes"]["hybrid_rerank"]["ranked_chunk_ids"][0] == 2
 
 
+def test_run_retrieval_benchmark_reports_rerank_only_mode(tmp_path: Path):
+    db_path = tmp_path / "sales.db"
+    seed_knowledge_chunks(db_path, sample_product_chunks())
+    cases_path = tmp_path / "cases.jsonl"
+    cases_path.write_text(
+        '{"case_id":"product_deployment","query":"private deployment and crm integration","source_type":"product","expected_chunk_ids":[2]}\n',
+        encoding="utf-8",
+    )
+
+    embedder = FakeEmbedder(
+        {
+            "private deployment and crm integration": [1.0, 0.0],
+            "Sales Copilot helps account teams capture meeting notes, keep account memory fresh, and turn follow-up actions into tracked work.\n\nThe workflow is deterministic and storage-backed, so the same inputs always produce the same outputs.": [1.0, 0.0],
+            "Deployment options include private deployment for security-sensitive teams, plus standard shared deployment for lighter use cases.\n\nSecurity teams often ask about SSO, audit logging, and how customer data is isolated.": [0.95, 0.0],
+            "CRM sync writes account stage changes, meeting summaries, and next-step notes back through the storage layer.\n\nThis keeps the sales record consistent without needing model calls.": [0.90, 0.0],
+        }
+    )
+    reranker = FakeReranker(
+        {
+            (
+                "private deployment and crm integration",
+                "Sales Copilot helps account teams capture meeting notes, keep account memory fresh, and turn follow-up actions into tracked work.\n\nThe workflow is deterministic and storage-backed, so the same inputs always produce the same outputs.",
+            ): 0.05,
+            (
+                "private deployment and crm integration",
+                "Deployment options include private deployment for security-sensitive teams, plus standard shared deployment for lighter use cases.\n\nSecurity teams often ask about SSO, audit logging, and how customer data is isolated.",
+            ): 0.95,
+            (
+                "private deployment and crm integration",
+                "CRM sync writes account stage changes, meeting summaries, and next-step notes back through the storage layer.\n\nThis keeps the sales record consistent without needing model calls.",
+            ): 0.80,
+        }
+    )
+
+    results = run_retrieval_benchmark(
+        cases_path=cases_path,
+        db_path=db_path,
+        embedder=embedder,
+        reranker=reranker,
+    )
+
+    assert "rerank_only" in results["summary"]
+    assert results["case_results"][0]["modes"]["rerank_only"]["ranked_chunk_ids"][0] == 2
+
+
 def test_run_retrieval_benchmark_includes_bucket_summary(tmp_path: Path):
     db_path = tmp_path / "sales.db"
     seed_knowledge_chunks(db_path, sample_product_chunks())

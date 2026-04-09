@@ -146,6 +146,38 @@ def hybrid_rerank_retrieve_rows(
     return reranked[:top_k]
 
 
+def rerank_only_retrieve_rows(
+    query: str,
+    rows: list[dict],
+    *,
+    embedder: Embedder | None,
+    reranker: Reranker | None,
+    top_k: int = 3,
+    rerank_candidate_k: int = 10,
+) -> list[dict]:
+    candidate_k = min(len(rows), max(top_k, rerank_candidate_k))
+    hybrid_rows = hybrid_retrieve_rows(query, rows, embedder=embedder, top_k=candidate_k)
+
+    if reranker is None:
+        return hybrid_rows[:top_k]
+
+    pairs = [(query, str(row.get("chunk_text", ""))) for row in hybrid_rows]
+    rerank_scores = reranker.score_pairs(pairs)
+
+    reranked: list[dict] = []
+    for row, rerank_score in zip(hybrid_rows, rerank_scores):
+        reranked.append(
+            {
+                **row,
+                "rerank_score": float(rerank_score),
+                "retrieval_mode": "rerank_only",
+            }
+        )
+
+    reranked.sort(key=lambda item: (item["rerank_score"], item.get("hybrid_score", 0.0)), reverse=True)
+    return reranked[:top_k]
+
+
 def hybrid_retrieve_knowledge_chunks(
     db_path,
     *,
@@ -214,6 +246,30 @@ def hybrid_rerank_knowledge_chunks(
     active_embedder = load_default_embedder() if embedder is _USE_DEFAULT_EMBEDDER else embedder
     active_reranker = load_default_reranker() if reranker is _USE_DEFAULT_RERANKER else reranker
     return hybrid_rerank_retrieve_rows(
+        query,
+        rows,
+        embedder=active_embedder,
+        reranker=active_reranker,
+        top_k=top_k,
+        rerank_candidate_k=rerank_candidate_k,
+    )
+
+
+def rerank_only_knowledge_chunks(
+    db_path,
+    *,
+    source_type: str | None,
+    query: str,
+    embedder: Embedder | None | object = _USE_DEFAULT_EMBEDDER,
+    reranker: Reranker | None | object = _USE_DEFAULT_RERANKER,
+    top_k: int = 3,
+    rerank_candidate_k: int = 10,
+) -> list[dict]:
+    storage_source_type = None if source_type in (None, "mixed") else source_type
+    rows = storage.list_knowledge_chunks(db_path, source_type=storage_source_type)
+    active_embedder = load_default_embedder() if embedder is _USE_DEFAULT_EMBEDDER else embedder
+    active_reranker = load_default_reranker() if reranker is _USE_DEFAULT_RERANKER else reranker
+    return rerank_only_retrieve_rows(
         query,
         rows,
         embedder=active_embedder,

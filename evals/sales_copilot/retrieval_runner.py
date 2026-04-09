@@ -16,7 +16,11 @@ from evals.sales_copilot.retrieval_metrics import (
     summarize_retrieval_metrics,
 )
 from sales_copilot import storage
-from sales_copilot.retrieval import hybrid_retrieve_knowledge_chunks, hybrid_rerank_knowledge_chunks
+from sales_copilot.retrieval import (
+    hybrid_retrieve_knowledge_chunks,
+    hybrid_rerank_knowledge_chunks,
+    rerank_only_knowledge_chunks,
+)
 from sales_copilot.tools import keyword_retrieve
 
 
@@ -356,6 +360,7 @@ def _evaluate_query_modes(
             "keyword_only": empty_metrics,
             "hybrid": empty_metrics,
             "hybrid_rerank": empty_metrics,
+            "rerank_only": empty_metrics,
         }
 
     keyword_rows = _keyword_only_retrieve(
@@ -376,14 +381,19 @@ def _evaluate_query_modes(
     hybrid_rerank_kwargs = dict(hybrid_kwargs)
     hybrid_rerank_kwargs["reranker"] = reranker
     hybrid_rerank_rows = hybrid_rerank_knowledge_chunks(db_path, **hybrid_rerank_kwargs)
+    rerank_only_kwargs = dict(hybrid_kwargs)
+    rerank_only_kwargs["reranker"] = reranker
+    rerank_only_rows = rerank_only_knowledge_chunks(db_path, **rerank_only_kwargs)
 
     keyword_ranked_ids = _ranked_chunk_ids(keyword_rows)
     hybrid_ranked_ids = _ranked_chunk_ids(hybrid_rows)
     hybrid_rerank_ranked_ids = _ranked_chunk_ids(hybrid_rerank_rows)
+    rerank_only_ranked_ids = _ranked_chunk_ids(rerank_only_rows)
     return {
         "keyword_only": _mode_metrics(case["expected_chunk_ids"], keyword_ranked_ids),
         "hybrid": _mode_metrics(case["expected_chunk_ids"], hybrid_ranked_ids),
         "hybrid_rerank": _mode_metrics(case["expected_chunk_ids"], hybrid_rerank_ranked_ids),
+        "rerank_only": _mode_metrics(case["expected_chunk_ids"], rerank_only_ranked_ids),
     }
 
 
@@ -397,7 +407,7 @@ def run_retrieval_benchmark(
 ) -> dict:
     cases = load_retrieval_cases(cases_path)
 
-    rows_by_mode: dict[str, list[dict[str, object]]] = {"keyword_only": [], "hybrid": [], "hybrid_rerank": []}
+    rows_by_mode: dict[str, list[dict[str, object]]] = _rows_by_mode_template()
     case_results: list[RetrievalCaseResult] = []
 
     for case in cases:
@@ -498,7 +508,7 @@ def _run_model_parse_for_case(
 
 
 def _rows_by_mode_template() -> dict[str, list[dict[str, object]]]:
-    return {"keyword_only": [], "hybrid": [], "hybrid_rerank": []}
+    return {"keyword_only": [], "hybrid": [], "hybrid_rerank": [], "rerank_only": []}
 
 
 def run_dual_path_retrieval_benchmark(

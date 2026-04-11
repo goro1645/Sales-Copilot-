@@ -96,6 +96,10 @@ def _build_report_markdown(bundle: dict[str, Any]) -> str:
         "list_field_recall",
         "list_field_f1",
         "average_list_field_f1",
+        "semantic_list_field_precision",
+        "semantic_list_field_recall",
+        "semantic_list_field_f1",
+        "average_semantic_list_field_f1",
         "risk_flag_recall",
     ):
         lines.append(f"| {key} | {parse_summary.get(key, 'N/A')} |")

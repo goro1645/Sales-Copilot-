@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from functools import lru_cache
+from math import inf
 import re
 from typing import Any
+
+from sales_copilot.retrieval import cosine_similarity, load_default_embedder
 
 
 LIST_FIELDS = (
@@ -20,6 +24,19 @@ WORKFLOW_ROUTES = (
     "standard_follow_up",
     "high_priority_follow_up",
 )
+SEMANTIC_FIELD_THRESHOLDS = {
+    "customer_roles": 0.84,
+    "confirmed_needs": 0.80,
+    "budget_signals": 0.78,
+    "timeline_signals": 0.78,
+    "next_steps": 0.78,
+    "competitors": 0.82,
+}
+FIELD_GUARD_MARKERS = {
+    "budget_signals": ("refund", "coupon", "discount", "price", "fee", "退款", "优惠券", "差价", "补偿", "价格", "价保"),
+    "timeline_signals": ("today", "tomorrow", "after", "within", "business day", "今天", "明天", "之后", "完成后", "工作日内", "稍后", "尽快"),
+    "next_steps": ("contact", "submit", "apply", "modify", "reorder", "return", "reply", "follow up", "联系", "提交", "申请", "修改", "重新下单", "寄回", "回复", "处理"),
+}
 
 
 def _normalize_text(value: Any) -> str:
@@ -59,6 +76,14 @@ def _normalize_business_phrase(value: Any) -> str:
     return collapsed
 
 
+def _semantic_normalize_text(value: Any) -> str:
+    text = _normalize_text(value)
+    text = re.sub(r"[\t\r\n]+", " ", text)
+    text = re.sub(r"[“”\"'`]+", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def _normalize_list(value: Any) -> list[str]:
     if not isinstance(value, Iterable) or isinstance(value, (str, bytes, dict)):
         return []
@@ -82,6 +107,87 @@ def _get_value(value: Any, key: str, default: Any = None) -> Any:
     if isinstance(value, dict):
         return value.get(key, default)
     return getattr(value, key, default)
+
+
+def _contains_any_marker(text: str, markers: tuple[str, ...]) -> bool:
+    for marker in markers:
+        if marker.isascii():
+            if marker in text:
+                return True
+        elif marker in text:
+            return True
+    return False
+
+
+def _passes_semantic_field_guard(field: str, gold_item: str, actual_item: str) -> bool:
+    markers = FIELD_GUARD_MARKERS.get(field)
+    if not markers:
+        return True
+    gold_text = _semantic_normalize_text(gold_item)
+    actual_text = _semantic_normalize_text(actual_item)
+    return _contains_any_marker(gold_text, markers) and _contains_any_marker(actual_text, markers)
+
+
+def _semantic_similarity_score(
+    field: str,
+    expected_item: str,
+    actual_item: str,
+    *,
+    embedder: Any | None,
+) -> float:
+    if not _passes_semantic_field_guard(field, expected_item, actual_item):
+        return -inf
+
+    if _task_title_matches(expected_item, actual_item):
+        return 1.0
+
+    if embedder is None:
+        return 0.0
+
+    texts = [_semantic_normalize_text(expected_item), _semantic_normalize_text(actual_item)]
+    vectors = embedder.embed_texts(texts)
+    if len(vectors) != 2:
+        return 0.0
+    return float(cosine_similarity(vectors[0], vectors[1]))
+
+
+def _semantic_best_match_count(
+    field: str,
+    expected: list[str],
+    actual: list[str],
+    *,
+    embedder: Any | None,
+) -> int:
+    threshold = SEMANTIC_FIELD_THRESHOLDS.get(field, 0.8)
+    pair_scores: list[list[float]] = []
+    for expected_item in expected:
+        pair_scores.append(
+            [
+                _semantic_similarity_score(field, expected_item, actual_item, embedder=embedder)
+                for actual_item in actual
+            ]
+        )
+
+    @lru_cache(maxsize=None)
+    def _search(expected_index: int, used_mask: int) -> tuple[int, float]:
+        if expected_index >= len(expected):
+            return 0, 0.0
+
+        best_match_count, best_score_sum = _search(expected_index + 1, used_mask)
+        for actual_index, score in enumerate(pair_scores[expected_index]):
+            if score < threshold:
+                continue
+            if used_mask & (1 << actual_index):
+                continue
+            downstream_count, downstream_score = _search(expected_index + 1, used_mask | (1 << actual_index))
+            candidate = (downstream_count + 1, downstream_score + score)
+            if candidate[0] > best_match_count or (
+                candidate[0] == best_match_count and candidate[1] > best_score_sum
+            ):
+                best_match_count, best_score_sum = candidate
+        return best_match_count, best_score_sum
+
+    return _search(0, 0)[0]
 
 
 def _normalize_route(value: Any) -> str:
@@ -189,6 +295,22 @@ def _set_precision_recall_f1(expected: list[str], actual: list[str]) -> tuple[fl
     return precision, recall, f1
 
 
+def _semantic_set_precision_recall_f1(field: str, expected: list[str], actual: list[str]) -> tuple[float, float, float]:
+    if not expected and not actual:
+        return 1.0, 1.0, 1.0
+    if not expected or not actual:
+        return 0.0, 0.0, 0.0
+
+    embedder = load_default_embedder()
+    true_positive = _semantic_best_match_count(field, expected, actual, embedder=embedder)
+    precision = true_positive / len(actual)
+    recall = true_positive / len(expected)
+    if precision + recall == 0:
+        return precision, recall, 0.0
+    f1 = 2 * precision * recall / (precision + recall)
+    return precision, recall, f1
+
+
 def _required_risk_flags(case: dict[str, Any]) -> list[str]:
     expected_workflow = case.get("expected_workflow", {})
     if not isinstance(expected_workflow, dict):
@@ -216,7 +338,11 @@ def _invalid_parse_metrics(case: dict[str, Any]) -> dict[str, Any]:
         "list_field_precision": {field: 0.0 for field in LIST_FIELDS},
         "list_field_recall": {field: 0.0 for field in LIST_FIELDS},
         "list_field_f1": {field: 0.0 for field in LIST_FIELDS},
+        "semantic_list_field_precision": {field: 0.0 for field in LIST_FIELDS},
+        "semantic_list_field_recall": {field: 0.0 for field in LIST_FIELDS},
+        "semantic_list_field_f1": {field: 0.0 for field in LIST_FIELDS},
         "list_field_applicable": _gold_list_field_applicability(expected_parse),
+        "semantic_list_field_applicable": _gold_list_field_applicability(expected_parse),
         "risk_flag_recall": 0.0,
         "risk_flag_applicable": _gold_risk_flag_applicability(case),
     }
@@ -251,19 +377,33 @@ def evaluate_parse_case(case: dict[str, Any], actual_parse: Any) -> dict[str, An
     list_field_precision: dict[str, float] = {}
     list_field_recall: dict[str, float] = {}
     list_field_f1: dict[str, float] = {}
+    semantic_list_field_precision: dict[str, float] = {}
+    semantic_list_field_recall: dict[str, float] = {}
+    semantic_list_field_f1: dict[str, float] = {}
     list_field_applicable: dict[str, bool] = {}
+    semantic_list_field_applicable: dict[str, bool] = {}
     for field in LIST_FIELDS:
         expected_values = _normalize_list(expected_parse.get(field, []))
         actual_values = _normalize_list(actual_parse.get(field, []))
         applicable = bool(expected_values or actual_values)
         if applicable:
             precision, recall, f1 = _set_precision_recall_f1(expected_values, actual_values)
+            semantic_precision, semantic_recall, semantic_f1 = _semantic_set_precision_recall_f1(
+                field,
+                expected_values,
+                actual_values,
+            )
         else:
             precision, recall, f1 = 0.0, 0.0, 0.0
+            semantic_precision, semantic_recall, semantic_f1 = 0.0, 0.0, 0.0
         list_field_precision[field] = precision
         list_field_recall[field] = recall
         list_field_f1[field] = f1
+        semantic_list_field_precision[field] = semantic_precision
+        semantic_list_field_recall[field] = semantic_recall
+        semantic_list_field_f1[field] = semantic_f1
         list_field_applicable[field] = applicable
+        semantic_list_field_applicable[field] = applicable
 
     risk_flags = _normalize_list(actual_parse.get("risk_flags", []))
     required_risk_flags = _required_risk_flags(case)
@@ -279,7 +419,11 @@ def evaluate_parse_case(case: dict[str, Any], actual_parse: Any) -> dict[str, An
         "list_field_precision": list_field_precision,
         "list_field_recall": list_field_recall,
         "list_field_f1": list_field_f1,
+        "semantic_list_field_precision": semantic_list_field_precision,
+        "semantic_list_field_recall": semantic_list_field_recall,
+        "semantic_list_field_f1": semantic_list_field_f1,
         "list_field_applicable": list_field_applicable,
+        "semantic_list_field_applicable": semantic_list_field_applicable,
         "risk_flag_recall": risk_flag_recall,
         "risk_flag_applicable": risk_flag_applicable,
     }
@@ -309,11 +453,18 @@ def summarize_parse_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     list_field_precision_values: list[float] = []
     list_field_recall_values: list[float] = []
     list_field_f1_values: list[float] = []
+    semantic_list_field_precision_values: list[float] = []
+    semantic_list_field_recall_values: list[float] = []
+    semantic_list_field_f1_values: list[float] = []
     for row in rows:
         list_field_precision = row.get("list_field_precision", {})
         list_field_recall = row.get("list_field_recall", {})
         list_field_f1 = row.get("list_field_f1", {})
         list_field_applicable = row.get("list_field_applicable", {})
+        semantic_list_field_precision = row.get("semantic_list_field_precision", {})
+        semantic_list_field_recall = row.get("semantic_list_field_recall", {})
+        semantic_list_field_f1 = row.get("semantic_list_field_f1", {})
+        semantic_list_field_applicable = row.get("semantic_list_field_applicable", list_field_applicable)
         if not isinstance(list_field_applicable, dict):
             continue
         for field in LIST_FIELDS:
@@ -325,6 +476,13 @@ def summarize_parse_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 list_field_recall_values.append(float(list_field_recall.get(field, 0.0)))
             if isinstance(list_field_f1, dict):
                 list_field_f1_values.append(float(list_field_f1.get(field, 0.0)))
+            if isinstance(semantic_list_field_applicable, dict) and semantic_list_field_applicable.get(field, False):
+                if isinstance(semantic_list_field_precision, dict):
+                    semantic_list_field_precision_values.append(float(semantic_list_field_precision.get(field, 0.0)))
+                if isinstance(semantic_list_field_recall, dict):
+                    semantic_list_field_recall_values.append(float(semantic_list_field_recall.get(field, 0.0)))
+                if isinstance(semantic_list_field_f1, dict):
+                    semantic_list_field_f1_values.append(float(semantic_list_field_f1.get(field, 0.0)))
 
     list_field_precision_average = (
         sum(list_field_precision_values) / len(list_field_precision_values) if list_field_precision_values else 0.0
@@ -334,6 +492,26 @@ def summarize_parse_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     )
     list_field_f1_average = sum(list_field_f1_values) / len(list_field_f1_values) if list_field_f1_values else 0.0
     average_list_field_f1 = sum(list_field_f1_values) / len(list_field_f1_values) if list_field_f1_values else 0.0
+    semantic_list_field_precision_average = (
+        sum(semantic_list_field_precision_values) / len(semantic_list_field_precision_values)
+        if semantic_list_field_precision_values
+        else 0.0
+    )
+    semantic_list_field_recall_average = (
+        sum(semantic_list_field_recall_values) / len(semantic_list_field_recall_values)
+        if semantic_list_field_recall_values
+        else 0.0
+    )
+    semantic_list_field_f1_average = (
+        sum(semantic_list_field_f1_values) / len(semantic_list_field_f1_values)
+        if semantic_list_field_f1_values
+        else 0.0
+    )
+    average_semantic_list_field_f1 = (
+        sum(semantic_list_field_f1_values) / len(semantic_list_field_f1_values)
+        if semantic_list_field_f1_values
+        else 0.0
+    )
     risk_flag_values = [
         float(row.get("risk_flag_recall", 0.0))
         for row in rows
@@ -348,6 +526,10 @@ def summarize_parse_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "list_field_recall": list_field_recall_average,
         "list_field_f1": list_field_f1_average,
         "average_list_field_f1": average_list_field_f1,
+        "semantic_list_field_precision": semantic_list_field_precision_average,
+        "semantic_list_field_recall": semantic_list_field_recall_average,
+        "semantic_list_field_f1": semantic_list_field_f1_average,
+        "average_semantic_list_field_f1": average_semantic_list_field_f1,
         "risk_flag_recall": risk_flag_recall,
     }
 

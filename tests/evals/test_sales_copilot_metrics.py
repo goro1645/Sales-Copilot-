@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from evals.sales_copilot.metrics import (
     evaluate_parse_case,
     evaluate_workflow_case,
@@ -270,6 +272,118 @@ def test_summarize_parse_metrics_ignores_non_applicable_risk_flags():
     summary = summarize_parse_metrics(rows)
 
     assert summary["risk_flag_recall"] == 1.0
+
+
+def test_evaluate_parse_case_adds_semantic_match_for_paraphrases():
+    case = {
+        "expected_parse": {
+            "account_name": "BluePeak Health",
+            "customer_roles": [],
+            "confirmed_needs": ["need private deployment with audit trail"],
+            "budget_signals": [],
+            "timeline_signals": [],
+            "next_steps": ["follow up after carrier review"],
+            "competitors": [],
+        },
+        "expected_workflow": {"required_risk_flags": []},
+    }
+    actual_parse = {
+        "account_name": "BluePeak Health",
+        "customer_roles": [],
+        "confirmed_needs": ["wants on-prem deployment and audit logging"],
+        "budget_signals": [],
+        "timeline_signals": [],
+        "next_steps": ["contact carrier, verify issue, then reply"],
+        "competitors": [],
+        "risk_flags": [],
+    }
+
+    fake_vectors = {
+        "need private deployment with audit trail": [1.0, 0.0],
+        "wants on-prem deployment and audit logging": [0.99, 0.01],
+        "follow up after carrier review": [0.0, 1.0],
+        "contact carrier, verify issue, then reply": [0.0, 0.99],
+    }
+
+    class _FakeEmbedder:
+        model_name = "fake-semantic"
+
+        def embed_texts(self, texts):
+            return [fake_vectors[text] for text in texts]
+
+    with patch("evals.sales_copilot.metrics.load_default_embedder", return_value=_FakeEmbedder()):
+        metrics = evaluate_parse_case(case, actual_parse)
+
+    assert metrics["semantic_list_field_f1"]["confirmed_needs"] == 1.0
+    assert metrics["semantic_list_field_f1"]["next_steps"] == 1.0
+
+
+def test_evaluate_parse_case_semantic_guards_block_cross_field_false_positive():
+    case = {
+        "expected_parse": {
+            "account_name": "BluePeak Health",
+            "customer_roles": [],
+            "confirmed_needs": [],
+            "budget_signals": ["refund coupon difference"],
+            "timeline_signals": [],
+            "next_steps": [],
+            "competitors": [],
+        },
+        "expected_workflow": {"required_risk_flags": []},
+    }
+    actual_parse = {
+        "account_name": "BluePeak Health",
+        "customer_roles": [],
+        "confirmed_needs": [],
+        "budget_signals": ["contact support tomorrow"],
+        "timeline_signals": [],
+        "next_steps": [],
+        "competitors": [],
+        "risk_flags": [],
+    }
+
+    fake_vectors = {
+        "refund coupon difference": [1.0, 0.0],
+        "contact support tomorrow": [1.0, 0.0],
+    }
+
+    class _FakeEmbedder:
+        model_name = "fake-semantic"
+
+        def embed_texts(self, texts):
+            return [fake_vectors[text] for text in texts]
+
+    with patch("evals.sales_copilot.metrics.load_default_embedder", return_value=_FakeEmbedder()):
+        metrics = evaluate_parse_case(case, actual_parse)
+
+    assert metrics["semantic_list_field_recall"]["budget_signals"] == 0.0
+
+
+def test_summarize_parse_metrics_includes_semantic_summary_values():
+    fields = ("customer_roles", "confirmed_needs", "budget_signals", "timeline_signals", "next_steps", "competitors")
+    rows = [
+        {
+            "json_valid": True,
+            "field_exact_match": {"account_name": True},
+            "list_field_precision": {field: 0.0 for field in fields},
+            "list_field_recall": {field: 0.0 for field in fields},
+            "list_field_f1": {field: 0.0 for field in fields},
+            "semantic_list_field_precision": {field: (1.0 if field == "confirmed_needs" else 0.0) for field in fields},
+            "semantic_list_field_recall": {field: (1.0 if field == "confirmed_needs" else 0.0) for field in fields},
+            "semantic_list_field_f1": {field: (1.0 if field == "confirmed_needs" else 0.0) for field in fields},
+            "list_field_applicable": {field: field == "confirmed_needs" for field in fields},
+            "semantic_list_field_applicable": {field: field == "confirmed_needs" for field in fields},
+            "risk_flag_recall": 0.0,
+            "risk_flag_applicable": False,
+        }
+    ]
+
+    summary = summarize_parse_metrics(rows)
+
+    assert summary["semantic_list_field_precision"] == 1.0
+    assert summary["semantic_list_field_recall"] == 1.0
+    assert summary["semantic_list_field_f1"] == 1.0
+    assert summary["average_semantic_list_field_f1"] == 1.0
 
 
 def test_summarize_parse_metrics_ignores_empty_list_fields_in_average():

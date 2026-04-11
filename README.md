@@ -39,6 +39,82 @@ Field groups include:
 
 This evaluation is used to validate structured extraction quality on public real customer-service conversations rather than synthetic prompts.
 
+The parse-only evaluator also supports an optional DeepSeek second-pass reclassification mode for the weakest fields:
+
+- `budget_signals`
+- `timeline_signals`
+- `next_steps`
+
+The current implementation uses a constrained DeepSeek tool-call path instead of freeform JSON classification output. The recommended validation flow is to run a small smoke evaluation first (for example `--limit 20`) and inspect the generated `case_results.jsonl` before any larger rerun.
+
+Run with:
+
+```powershell
+python scripts/run_sales_copilot_eval.py `
+  --dataset-kind full-csds `
+  --csds-data-dir /path/to/csds `
+  --csds-splits test `
+  --output-dir evals/sales_copilot/outputs_csds_full_reclass `
+  --mode offline `
+  --use-signal-reclassification
+```
+
+### Full-CSDS Gold Audit
+
+Because the `full-CSDS` benchmark adapts `UserSumm / AgentSumm / FinalSumm` into `expected_parse` with local rules, it should be treated as a weak benchmark rather than a fully human-verified gold set.
+
+To audit that weak-gold quality on a stratified sample from the official `test` split:
+
+```powershell
+python scripts/build_full_csds_gold_audit.py `
+  --csds-data-dir /path/to/csds `
+  --split test `
+  --output-dir evals/sales_copilot/outputs_csds_gold_audit
+```
+
+This writes:
+
+- `full_csds_gold_audit_sample.jsonl`
+- `full_csds_gold_audit_summary.json`
+
+### Full-CSDS Calibrated-100
+
+To build a higher-trust benchmark on top of the weak `full-CSDS 800` evaluation, the repository also supports a `100`-case calibrated working set.
+
+This pipeline:
+
+- samples `100` review-value cases from `full-CSDS test`
+- preserves `meeting_note_text`, `UserSumm`, `AgentSumm`, and `FinalSumm`
+- includes the auto-generated weak gold as reference
+- seeds AI-assisted pre-annotation from an existing baseline `case_results.jsonl`
+- writes a working file for human review
+
+Generate the working set with:
+
+```powershell
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\build_full_csds_calibrated_subset.py' `
+  --csds-data-dir 'D:\minimind\.worktrees\minimind-job-agent\tmp_csds_download' `
+  --split test `
+  --baseline-case-results 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_full_post_cache_move\20260410020844\case_results.jsonl' `
+  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_calibrated_100'
+```
+
+This writes:
+
+- `full_csds_calibration_working_100.jsonl`
+
+After review, export the final calibrated benchmark with:
+
+```powershell
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\build_full_csds_calibrated_subset.py' `
+  --export-final-from-working 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_calibrated_100\full_csds_calibration_working_100.jsonl' `
+  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_calibrated_100'
+```
+
+This writes:
+
+- `full_csds_calibrated_100.jsonl`
+
 ### Workflow Evaluation
 
 Workflow behaviors such as route selection, CRM write-back, and task creation are evaluated separately on self-built golden cases, because public customer-service corpora do not provide direct labels for sales workflow execution.

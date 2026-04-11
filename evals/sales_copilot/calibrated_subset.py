@@ -337,6 +337,8 @@ def build_calibrated_working_rows(
         rows.append(
             {
                 "case_id": case.get("case_id", ""),
+                "segment": case.get("segment", "calibrated_subset"),
+                "source_dataset": case.get("source_dataset", "full-csds"),
                 "source_uid": case.get("source_uid", ""),
                 "source_split": case.get("source_split", ""),
                 "source_note": case.get("source_note", ""),
@@ -390,11 +392,15 @@ def export_final_calibrated_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
         final_rows.append(
             {
                 "case_id": row.get("case_id", ""),
+                "segment": row.get("segment", "calibrated_subset"),
+                "source_dataset": row.get("source_dataset", "full-csds-ai-calibrated"),
                 "source_uid": row.get("source_uid", ""),
                 "source_split": row.get("source_split", ""),
+                "source_note": row.get("source_note", "AI-calibrated benchmark draft derived from the full-CSDS working set."),
                 "meeting_note_text": row.get("meeting_note_text", ""),
                 "customer_profile_text": row.get("customer_profile_text", ""),
                 "expected_parse": expected_parse,
+                "expected_workflow": {"required_risk_flags": []},
             }
         )
     return final_rows

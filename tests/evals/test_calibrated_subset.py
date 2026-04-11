@@ -186,6 +186,8 @@ def test_export_final_calibrated_rows_prefers_human_review_when_present() -> Non
     final_rows = export_final_calibrated_rows(rows)
 
     assert final_rows[0]["expected_parse"]["next_steps"] == ["contact support to proceed"]
+    assert final_rows[0]["expected_workflow"] == {"required_risk_flags": []}
+    assert final_rows[0]["segment"] == "calibrated_subset"
 
 
 def test_fill_ai_review_rows_writes_human_review_block() -> None:

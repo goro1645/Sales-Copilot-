@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,10 +15,12 @@ from evals.sales_copilot.calibrated_subset import (
     build_calibrated_sample,
     build_calibrated_working_rows,
     export_final_calibrated_rows,
+    fill_ai_review_rows,
     load_case_results_by_id,
     write_jsonl,
 )
 from evals.sales_copilot.csds_adapter import load_full_csds_cases
+from llm.deepseek_client import DeepSeekClient
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -27,7 +30,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--baseline-case-results", default="")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--export-final-from-working", default="")
+    parser.add_argument("--fill-ai-review-from-working", default="")
+    parser.add_argument("--api-key", default="")
+    parser.add_argument("--api-base-url", default="https://api.deepseek.com")
+    parser.add_argument("--api-model", default="deepseek-chat")
     return parser
+
+
+def _build_deepseek_client(api_key: str, base_url: str, model: str):
+    return DeepSeekClient(api_key=api_key, base_url=base_url, model=model)
 
 
 def _load_raw_split_rows(dataset_dir: Path, split: str) -> dict[str, dict[str, Any]]:
@@ -75,6 +86,24 @@ def main() -> int:
     args = _build_parser().parse_args()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.fill_ai_review_from_working:
+        api_key = str(args.api_key or os.environ.get("DEEPSEEK_API_KEY", "")).strip()
+        if not api_key:
+            raise SystemExit("Missing DeepSeek API key. Pass --api-key or set DEEPSEEK_API_KEY.")
+
+        working_rows = _read_jsonl_rows(Path(args.fill_ai_review_from_working))
+        client = _build_deepseek_client(api_key, args.api_base_url, args.api_model)
+        reviewed_rows = fill_ai_review_rows(working_rows, llm_client=client)
+        reviewed_path = output_dir / "full_csds_calibration_working_100.ai_reviewed.jsonl"
+        final_rows = export_final_calibrated_rows(reviewed_rows)
+        final_path = output_dir / "full_csds_ai_calibrated_100.jsonl"
+        write_jsonl(reviewed_path, reviewed_rows)
+        write_jsonl(final_path, final_rows)
+        print(f"AI-reviewed {len(reviewed_rows)} rows.")
+        print(f"ai_reviewed_jsonl: {reviewed_path}")
+        print(f"final_jsonl: {final_path}")
+        return 0
 
     if args.export_final_from_working:
         working_rows = _read_jsonl_rows(Path(args.export_final_from_working))

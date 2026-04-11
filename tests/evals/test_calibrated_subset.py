@@ -4,6 +4,7 @@ from evals.sales_copilot.calibrated_subset import (
     build_calibrated_sample,
     build_calibrated_working_rows,
     export_final_calibrated_rows,
+    fill_ai_review_rows,
 )
 
 
@@ -185,3 +186,66 @@ def test_export_final_calibrated_rows_prefers_human_review_when_present() -> Non
     final_rows = export_final_calibrated_rows(rows)
 
     assert final_rows[0]["expected_parse"]["next_steps"] == ["contact support to proceed"]
+
+
+def test_fill_ai_review_rows_writes_human_review_block() -> None:
+    class _FakeClient:
+        def complete_with_tool(self, messages, tools, tool_choice):
+            return {
+                "tool_name": "submit_ai_calibrated_parse",
+                "arguments": {
+                    "corrected_expected_parse": {
+                        "confirmed_needs": ["confirm refund progress"],
+                        "budget_signals": ["coupon cannot be reused"],
+                        "timeline_signals": ["within one business day"],
+                        "next_steps": ["customer submits after-sales request"],
+                    }
+                },
+            }
+
+    rows = [
+        {
+            "case_id": "case_1",
+            "sampling_bucket": "budget_boundary",
+            "meeting_note_text": "Customer asks about coupon reuse and refund timing.",
+            "customer_profile_text": "Source: CSDS",
+            "user_summ": ["check coupon reuse"],
+            "agent_summ": ["submit after-sales request within one business day"],
+            "final_summ": ["coupon cannot be reused; submit after-sales request within one business day"],
+            "auto_expected_parse": {
+                "account_name": "JD Support",
+                "customer_roles": ["user", "agent"],
+                "confirmed_needs": ["check coupon reuse"],
+                "budget_signals": [],
+                "timeline_signals": [],
+                "next_steps": ["submit after-sales request"],
+                "competitors": [],
+            },
+            "baseline_parse_result": {
+                "account_name": "JD Support",
+                "customer_roles": ["user", "agent"],
+                "confirmed_needs": ["check coupon reuse"],
+                "budget_signals": ["coupon cannot be reused"],
+                "timeline_signals": ["within one business day"],
+                "next_steps": ["submit after-sales request"],
+                "competitors": [],
+            },
+            "pre_annotation": {
+                "corrected_expected_parse": {
+                    "confirmed_needs": ["check coupon reuse"],
+                    "budget_signals": ["coupon cannot be reused"],
+                    "timeline_signals": [],
+                    "next_steps": ["submit after-sales request"],
+                },
+                "review_reason": "budget_boundary_case",
+            },
+            "human_review": {},
+        }
+    ]
+
+    reviewed = fill_ai_review_rows(rows, llm_client=_FakeClient())
+
+    assert reviewed[0]["human_review"]["reviewed_by"] == "ai"
+    assert reviewed[0]["human_review"]["review_status"] == "completed"
+    assert reviewed[0]["human_review"]["final_expected_parse"]["timeline_signals"] == ["within one business day"]
+    assert reviewed[0]["human_review"]["final_expected_parse"]["next_steps"] == ["customer submits after-sales request"]

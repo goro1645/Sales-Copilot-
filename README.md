@@ -115,6 +115,32 @@ This writes:
 
 - `full_csds_calibrated_100.jsonl`
 
+### Full-CSDS AI-Calibrated-100
+
+The repository can also turn the `100`-case working set into an `AI-calibrated benchmark draft`.
+
+This path:
+
+- keeps the original working set intact
+- fills `human_review.final_expected_parse` with an AI-authored review block
+- exports `full_csds_ai_calibrated_100.jsonl`
+- should be described as `AI-calibrated`, not `human-calibrated`
+
+Generate the AI-reviewed working file and export the draft benchmark with:
+
+```powershell
+& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\build_full_csds_calibrated_subset.py' `
+  --fill-ai-review-from-working 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_calibrated_100\full_csds_calibration_working_100.jsonl' `
+  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_calibrated_100'
+```
+
+This requires `DEEPSEEK_API_KEY` or `--api-key`.
+
+This writes:
+
+- `full_csds_calibration_working_100.ai_reviewed.jsonl`
+- `full_csds_ai_calibrated_100.jsonl`
+
 ### Workflow Evaluation
 
 Workflow behaviors such as route selection, CRM write-back, and task creation are evaluated separately on self-built golden cases, because public customer-service corpora do not provide direct labels for sales workflow execution.

@@ -14,6 +14,8 @@ TARGET_FIELDS = (
     "next_steps",
 )
 
+AI_REVIEW_TOOL_NAME = "submit_ai_calibrated_parse"
+
 TARGET_BUCKETS = {
     "ordinary_stable": 25,
     "timeline_boundary": 20,
@@ -86,6 +88,10 @@ def _normalize_text(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip().lower()
+
+
+def _stringify_string_list(values: list[str]) -> str:
+    return " | ".join(values) if values else "(empty)"
 
 
 def _contains_any_marker(text: str, markers: tuple[str, ...]) -> bool:
@@ -392,6 +398,166 @@ def export_final_calibrated_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
             }
         )
     return final_rows
+
+
+def build_ai_calibration_tools() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": AI_REVIEW_TOOL_NAME,
+                "description": "Return the final AI-calibrated expected_parse for the target Sales Copilot fields.",
+                "strict": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "corrected_expected_parse": {
+                            "type": "object",
+                            "properties": {
+                                field: {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                }
+                                for field in TARGET_FIELDS
+                            },
+                            "required": list(TARGET_FIELDS),
+                            "additionalProperties": False,
+                        }
+                    },
+                    "required": ["corrected_expected_parse"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+
+
+def build_ai_calibration_messages(row: dict[str, Any]) -> list[dict[str, str]]:
+    auto_expected_parse = row.get("auto_expected_parse", {})
+    if not isinstance(auto_expected_parse, dict):
+        auto_expected_parse = {}
+
+    baseline_parse_result = row.get("baseline_parse_result", {})
+    if not isinstance(baseline_parse_result, dict):
+        baseline_parse_result = {}
+
+    pre_annotation = row.get("pre_annotation", {})
+    if not isinstance(pre_annotation, dict):
+        pre_annotation = {}
+    corrected_expected = pre_annotation.get("corrected_expected_parse", {})
+    if not isinstance(corrected_expected, dict):
+        corrected_expected = {}
+
+    lines = [
+        f"case_id: {row.get('case_id', '')}",
+        f"sampling_bucket: {row.get('sampling_bucket', '')}",
+        "",
+        "meeting_note_text:",
+        str(row.get("meeting_note_text", "")),
+        "",
+        "user_summ:",
+        _stringify_string_list(_normalize_string_list(row.get("user_summ", []))),
+        "",
+        "agent_summ:",
+        _stringify_string_list(_normalize_string_list(row.get("agent_summ", []))),
+        "",
+        "final_summ:",
+        _stringify_string_list(_normalize_string_list(row.get("final_summ", []))),
+        "",
+        "auto_expected_parse:",
+    ]
+    for field in TARGET_FIELDS:
+        lines.append(f"- {field}: {_stringify_string_list(_normalize_string_list(auto_expected_parse.get(field, [])))}")
+    lines.append("")
+    lines.append("baseline_parse_result:")
+    for field in TARGET_FIELDS:
+        lines.append(f"- {field}: {_stringify_string_list(_normalize_string_list(baseline_parse_result.get(field, [])))}")
+    lines.append("")
+    lines.append("pre_annotation.corrected_expected_parse:")
+    for field in TARGET_FIELDS:
+        lines.append(f"- {field}: {_stringify_string_list(_normalize_string_list(corrected_expected.get(field, [])))}")
+    lines.append("")
+    lines.append("Return the most semantically faithful final field values for the four target fields only.")
+    lines.append("Use concise field-appropriate phrases. Prefer clean field assignment over copying weak-gold overlaps.")
+    lines.append("Do not change account_name, customer_roles, or competitors here.")
+
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are calibrating a Sales Copilot benchmark draft. "
+                "Review the raw conversation summary plus weak auto-gold, baseline parse, "
+                "and pre-annotation. Then call the tool with the final corrected_expected_parse. "
+                "Each field must be a list of concise strings. "
+                "budget_signals only contains price/refund/coupon/compensation signals. "
+                "timeline_signals only contains time/order/duration constraints. "
+                "next_steps only contains follow-up actions or promises."
+            ),
+        },
+        {"role": "user", "content": "\n".join(lines)},
+    ]
+
+
+def _normalize_ai_corrected_expected_parse(
+    corrected_expected_parse: dict[str, Any],
+    row: dict[str, Any],
+) -> dict[str, list[str]]:
+    if not isinstance(corrected_expected_parse, dict):
+        raise ValueError("AI corrected_expected_parse must be a dict")
+
+    pre_annotation = row.get("pre_annotation", {})
+    if not isinstance(pre_annotation, dict):
+        pre_annotation = {}
+    pre_corrected = pre_annotation.get("corrected_expected_parse", {})
+    if not isinstance(pre_corrected, dict):
+        pre_corrected = {}
+
+    normalized: dict[str, list[str]] = {}
+    for field in TARGET_FIELDS:
+        value = corrected_expected_parse.get(field)
+        if value is None:
+            value = pre_corrected.get(field, [])
+        normalized[field] = _normalize_string_list(value)
+    return normalized
+
+
+def fill_ai_review_for_row(
+    row: dict[str, Any],
+    *,
+    llm_client: Any,
+) -> dict[str, Any]:
+    tool_result = llm_client.complete_with_tool(
+        build_ai_calibration_messages(row),
+        tools=build_ai_calibration_tools(),
+        tool_choice={"type": "function", "function": {"name": AI_REVIEW_TOOL_NAME}},
+    )
+
+    tool_name = tool_result.get("tool_name")
+    if tool_name != AI_REVIEW_TOOL_NAME:
+        raise ValueError(f"Unexpected AI calibration tool call: {tool_name}")
+
+    arguments = tool_result.get("arguments", {})
+    if not isinstance(arguments, dict):
+        raise ValueError("AI calibration arguments must be a dict")
+
+    corrected = _normalize_ai_corrected_expected_parse(arguments.get("corrected_expected_parse", {}), row)
+
+    updated = dict(row)
+    updated["human_review"] = {
+        "final_expected_parse": corrected,
+        "reviewed_by": "ai",
+        "review_status": "completed",
+        "review_note": "AI-calibrated draft produced with DeepSeek tool-call review.",
+    }
+    return updated
+
+
+def fill_ai_review_rows(
+    rows: list[dict[str, Any]],
+    *,
+    llm_client: Any,
+) -> list[dict[str, Any]]:
+    return [fill_ai_review_for_row(row, llm_client=llm_client) for row in rows]
 
 
 def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:

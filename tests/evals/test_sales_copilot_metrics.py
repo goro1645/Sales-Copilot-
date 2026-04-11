@@ -359,7 +359,36 @@ def test_evaluate_parse_case_semantic_guards_block_cross_field_false_positive():
     assert metrics["semantic_list_field_recall"]["budget_signals"] == 0.0
 
 
-def test_evaluate_parse_case_semantic_literal_match_bypasses_field_guard():
+def test_evaluate_parse_case_semantic_literal_match_bypasses_field_guard_for_low_risk_fields():
+    case = {
+        "expected_parse": {
+            "account_name": "BluePeak Health",
+            "customer_roles": [],
+            "confirmed_needs": ["private deployment need"],
+            "budget_signals": [],
+            "timeline_signals": [],
+            "next_steps": [],
+            "competitors": [],
+        },
+        "expected_workflow": {"required_risk_flags": []},
+    }
+    actual_parse = {
+        "account_name": "BluePeak Health",
+        "customer_roles": [],
+        "confirmed_needs": ["private deployment"],
+        "budget_signals": [],
+        "timeline_signals": [],
+        "next_steps": [],
+        "competitors": [],
+        "risk_flags": [],
+    }
+
+    metrics = evaluate_parse_case(case, actual_parse)
+
+    assert metrics["semantic_list_field_f1"]["confirmed_needs"] == 1.0
+
+
+def test_evaluate_parse_case_semantic_high_risk_fields_do_not_bypass_on_loose_literal_match():
     case = {
         "expected_parse": {
             "account_name": "BluePeak Health",
@@ -383,9 +412,10 @@ def test_evaluate_parse_case_semantic_literal_match_bypasses_field_guard():
         "risk_flags": [],
     }
 
-    metrics = evaluate_parse_case(case, actual_parse)
+    with patch("evals.sales_copilot.metrics.load_default_embedder", return_value=None):
+        metrics = evaluate_parse_case(case, actual_parse)
 
-    assert metrics["semantic_list_field_f1"]["budget_signals"] == 1.0
+    assert metrics["semantic_list_field_f1"]["budget_signals"] == 0.0
 
 
 def test_summarize_parse_metrics_includes_semantic_summary_values():

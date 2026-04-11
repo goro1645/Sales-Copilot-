@@ -37,6 +37,11 @@ FIELD_GUARD_MARKERS = {
     "timeline_signals": ("today", "tomorrow", "after", "within", "business day", "今天", "明天", "之后", "完成后", "工作日内", "稍后", "尽快"),
     "next_steps": ("contact", "submit", "apply", "modify", "reorder", "return", "reply", "follow up", "联系", "提交", "申请", "修改", "重新下单", "寄回", "回复", "处理"),
 }
+LOW_RISK_SEMANTIC_LITERAL_BYPASS_FIELDS = {
+    "customer_roles",
+    "confirmed_needs",
+    "competitors",
+}
 
 
 def _normalize_text(value: Any) -> str:
@@ -128,6 +133,18 @@ def _passes_semantic_field_guard(field: str, gold_item: str, actual_item: str) -
     return _contains_any_marker(gold_text, markers) and _contains_any_marker(actual_text, markers)
 
 
+def _allows_semantic_literal_bypass(field: str, expected_item: str, actual_item: str) -> bool:
+    expected_text = _semantic_normalize_text(expected_item)
+    actual_text = _semantic_normalize_text(actual_item)
+    if not expected_text or not actual_text:
+        return False
+    if expected_text == actual_text:
+        return True
+    if field in LOW_RISK_SEMANTIC_LITERAL_BYPASS_FIELDS and _task_title_matches(expected_item, actual_item):
+        return True
+    return False
+
+
 def _semantic_similarity_score(
     field: str,
     expected_item: str,
@@ -135,7 +152,7 @@ def _semantic_similarity_score(
     *,
     embedder: Any | None,
 ) -> float:
-    if _task_title_matches(expected_item, actual_item):
+    if _allows_semantic_literal_bypass(field, expected_item, actual_item):
         return 1.0
 
     if not _passes_semantic_field_guard(field, expected_item, actual_item):

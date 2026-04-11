@@ -27,9 +27,9 @@ WORKFLOW_ROUTES = (
 SEMANTIC_FIELD_THRESHOLDS = {
     "customer_roles": 0.84,
     "confirmed_needs": 0.80,
-    "budget_signals": 0.78,
-    "timeline_signals": 0.78,
-    "next_steps": 0.78,
+    "budget_signals": 0.72,
+    "timeline_signals": 0.70,
+    "next_steps": 0.68,
     "competitors": 0.82,
 }
 FIELD_GUARD_MARKERS = {
@@ -135,11 +135,11 @@ def _semantic_similarity_score(
     *,
     embedder: Any | None,
 ) -> float:
-    if not _passes_semantic_field_guard(field, expected_item, actual_item):
-        return -inf
-
     if _task_title_matches(expected_item, actual_item):
         return 1.0
+
+    if not _passes_semantic_field_guard(field, expected_item, actual_item):
+        return -inf
 
     if embedder is None:
         return 0.0

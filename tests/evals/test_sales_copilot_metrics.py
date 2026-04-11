@@ -359,6 +359,35 @@ def test_evaluate_parse_case_semantic_guards_block_cross_field_false_positive():
     assert metrics["semantic_list_field_recall"]["budget_signals"] == 0.0
 
 
+def test_evaluate_parse_case_semantic_literal_match_bypasses_field_guard():
+    case = {
+        "expected_parse": {
+            "account_name": "BluePeak Health",
+            "customer_roles": [],
+            "confirmed_needs": [],
+            "budget_signals": ["shipping credit request"],
+            "timeline_signals": [],
+            "next_steps": [],
+            "competitors": [],
+        },
+        "expected_workflow": {"required_risk_flags": []},
+    }
+    actual_parse = {
+        "account_name": "BluePeak Health",
+        "customer_roles": [],
+        "confirmed_needs": [],
+        "budget_signals": ["shipping credit"],
+        "timeline_signals": [],
+        "next_steps": [],
+        "competitors": [],
+        "risk_flags": [],
+    }
+
+    metrics = evaluate_parse_case(case, actual_parse)
+
+    assert metrics["semantic_list_field_f1"]["budget_signals"] == 1.0
+
+
 def test_summarize_parse_metrics_includes_semantic_summary_values():
     fields = ("customer_roles", "confirmed_needs", "budget_signals", "timeline_signals", "next_steps", "competitors")
     rows = [

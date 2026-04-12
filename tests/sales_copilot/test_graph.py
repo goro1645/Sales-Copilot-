@@ -190,6 +190,7 @@ def test_low_priority_branch_runs_through_write_back_crm(tmp_path: Path):
         "retrieve_context",
         "load_account_memory",
         "evaluate_lead",
+        "build_task_candidates",
         "low_priority_nurture",
         "write_back_crm",
         "generate_dashboard_output",
@@ -218,6 +219,7 @@ def test_standard_follow_up_branch_runs_through_write_back_crm(tmp_path: Path):
         "retrieve_context",
         "load_account_memory",
         "evaluate_lead",
+        "build_task_candidates",
         "standard_follow_up",
         "write_back_crm",
         "generate_dashboard_output",
@@ -246,6 +248,114 @@ def test_parse_meeting_note_uses_existing_summary_only_when_note_is_empty(tmp_pa
     assert len(llm_client.calls) == 2
     assert "Parse the meeting notes" in "\n".join(message["content"] for message in llm_client.calls[0])
     assert "Evaluate the lead" in "\n".join(message["content"] for message in llm_client.calls[1])
+
+
+def test_standard_follow_up_flow_records_build_task_candidates(tmp_path: Path) -> None:
+    graph = build_sales_copilot_graph(
+        llm_client=_FakeLLMClient(),
+        database_path=tmp_path / "sales_copilot.db",
+    )
+
+    result = graph.invoke(
+        {
+            "meeting_summary": {
+                "confirmed_needs": ["proposal support"],
+                "next_steps": ["send tailored proposal by Friday"],
+            },
+            "lead_score": 60,
+            "lead_priority": "medium",
+            "opportunity_stage": "proposal",
+            "risk_flags": [],
+            "workflow_log": [],
+        }
+    )
+
+    assert "build_task_candidates" in result["workflow_log"]
+    assert result["task_candidates"][0]["text"] == "send tailored proposal by Friday"
+
+
+def test_standard_follow_up_merges_candidate_tasks_when_model_returns_empty_tasks(tmp_path: Path) -> None:
+    class _SparseLLM(_FakeLLMClient):
+        def complete(self, messages, response_format=None):
+            prompt_text = "\n".join(message["content"] for message in messages)
+            if "follow-up plan" in prompt_text.lower():
+                return '{"summary": "Execute the agreed follow-up.", "tasks": []}'
+            return super().complete(messages, response_format=response_format)
+
+    graph = build_sales_copilot_graph(
+        llm_client=_SparseLLM(),
+        database_path=tmp_path / "sales_copilot.db",
+    )
+
+    result = graph.invoke(
+        {
+            "meeting_summary": {
+                "confirmed_needs": ["proposal support"],
+                "next_steps": ["send tailored proposal by Friday"],
+            },
+            "lead_score": 82,
+            "lead_priority": "high",
+            "opportunity_stage": "proposal",
+            "risk_flags": [],
+            "workflow_log": [],
+        }
+    )
+
+    assert any(task["title"] == "Send tailored proposal" for task in result["task_payload"])
+
+
+def test_retrieve_context_node_uses_hybrid_retrieval_metadata(tmp_path: Path, monkeypatch):
+    from sales_copilot.graph import retrieve_context_node
+    from sales_copilot.storage import init_storage
+
+    db_path = tmp_path / "sales.db"
+    init_storage(db_path)
+
+    monkeypatch.setattr(
+        "sales_copilot.graph.hybrid_retrieve_knowledge_chunks",
+        lambda *args, **kwargs: [
+            {
+                "id": 1,
+                "source_name": "Doc A",
+                "chunk_text": "Private deployment",
+                "retrieval_mode": "hybrid",
+                "vector_score": 0.95,
+                "keyword_score": 1.0,
+                "hybrid_score": 0.965,
+            }
+        ],
+    )
+
+    result = retrieve_context_node(
+        {
+            "meeting_summary": {"confirmed_needs": ["private deployment"]},
+            "meeting_note_raw": "Need private deployment.",
+        },
+        database_path=db_path,
+    )
+
+    assert result["retrieved_docs"][0]["retrieval_mode"] == "hybrid"
+    assert result["workflow_log"][-1] == "retrieve_context"
+
+
+def test_retrieve_context_node_supports_explicit_keyword_only_mode(tmp_path: Path):
+    from sales_copilot.graph import retrieve_context_node
+    from sales_copilot.tools import sample_product_chunks, seed_knowledge_chunks
+
+    db_path = tmp_path / "sales.db"
+    seed_knowledge_chunks(db_path, sample_product_chunks())
+
+    result = retrieve_context_node(
+        {
+            "meeting_summary": {"confirmed_needs": ["private deployment"]},
+            "meeting_note_raw": "Need private deployment.",
+        },
+        database_path=db_path,
+        retrieval_embedder=None,
+    )
+
+    assert result["retrieved_docs"]
+    assert all(doc["retrieval_mode"] == "keyword_only" for doc in result["retrieved_docs"])
 
 
 def test_dashboard_output_prefers_database_account_name(tmp_path: Path):

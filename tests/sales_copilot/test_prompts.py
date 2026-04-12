@@ -1,4 +1,5 @@
 import inspect
+from typing import get_type_hints
 
 from sales_copilot.prompts import (
     build_crm_update_messages,
@@ -6,7 +7,9 @@ from sales_copilot.prompts import (
     build_followup_plan_messages,
     build_lead_scoring_messages,
     build_meeting_parse_messages,
+    build_signal_reclassification_messages,
 )
+from sales_copilot.state import SalesCopilotState
 
 
 def test_build_meeting_parse_messages_requests_json_and_uses_notes():
@@ -89,13 +92,15 @@ def test_build_lead_scoring_messages_mentions_json_and_input_context():
 
 def test_build_followup_plan_messages_mentions_no_hallucination():
     assert str(inspect.signature(build_followup_plan_messages)) == (
-        "(*, meeting_summary: dict, opportunity_stage: str, risk_flags: list[str]) -> list[dict[str, str]]"
+        "(*, meeting_summary: dict, opportunity_stage: str, risk_flags: list[str], "
+        "task_candidates: list[dict]) -> list[dict[str, str]]"
     )
 
     messages = build_followup_plan_messages(
         meeting_summary={"summary": "Interested in a pilot."},
         opportunity_stage="Proposal",
         risk_flags=["pricing risk", "no champion"],
+        task_candidates=[],
     )
 
     assert messages[0]["role"] == "system"
@@ -103,6 +108,37 @@ def test_build_followup_plan_messages_mentions_no_hallucination():
     assert "proposal" in messages[1]["content"].lower()
     assert "pricing risk" in messages[1]["content"].lower()
     assert '"summary": "Interested in a pilot."' in messages[1]["content"]
+
+
+def test_sales_copilot_state_includes_task_candidates() -> None:
+    hints = get_type_hints(SalesCopilotState)
+
+    assert "task_candidates" in hints
+
+
+def test_build_followup_plan_messages_mentions_task_candidates_and_prioritizes_them():
+    messages = build_followup_plan_messages(
+        meeting_summary={"next_steps": ["send tailored proposal by Friday"]},
+        opportunity_stage="proposal",
+        risk_flags=["stakeholder_missing"],
+        task_candidates=[
+            {
+                "text": "send tailored proposal by Friday",
+                "source": "meeting_next_steps",
+                "task_type": "proposal_or_quote",
+                "priority_hint": "high",
+                "timing_hint": "this_week",
+                "evidence": ["Customer asked for proposal by Friday."],
+            }
+        ],
+    )
+
+    prompt_text = messages[1]["content"].lower()
+
+    assert "task candidates" in prompt_text
+    assert "prioritize" in prompt_text
+    assert "do not ignore the task candidates" in prompt_text
+    assert '"text": "send tailored proposal by Friday"' in messages[1]["content"]
 
 
 def test_build_crm_update_messages_carries_current_crm_state():
@@ -129,3 +165,55 @@ def test_build_dashboard_summary_messages_mentions_output_structure():
     assert "dashboard" in messages[0]["content"].lower()
     assert "json" in messages[0]["content"].lower()
     assert "MiniMind" in messages[1]["content"]
+
+
+
+def test_build_meeting_parse_messages_explains_customer_service_budget_and_timeline_rules():
+    messages = build_meeting_parse_messages(
+        customer_profile_text="CSDS customer-service context.",
+        meeting_note_text="????????????????????????????",
+    )
+
+    user_prompt = messages[1]["content"].lower()
+
+    assert "budget_signals" in user_prompt
+    assert "timeline_signals" in user_prompt
+    assert "coupon" in user_prompt
+    assert "refund" in user_prompt
+    assert "price-protection" in user_prompt
+    assert "3 business days" in user_prompt
+    assert "status-gated timing" in user_prompt
+
+
+def test_build_meeting_parse_messages_allows_customer_service_facts_to_appear_in_multiple_fields():
+    messages = build_meeting_parse_messages(
+        customer_profile_text="CSDS customer-service context.",
+        meeting_note_text="The agent said a callback will happen today and the refund will arrive in 3 business days.",
+    )
+
+    user_prompt = messages[1]["content"].lower()
+
+    assert "same fact may appear in multiple fields" in user_prompt
+    assert "copy timing or status facts into timeline_signals" in user_prompt
+    assert "copy pricing or refund facts into budget_signals" in user_prompt
+    assert "even when the sentence is also used in next_steps or objections" in user_prompt
+
+
+def test_build_signal_reclassification_messages_contains_fixed_labels():
+    messages = build_signal_reclassification_messages(
+        conversation_context="客服说明订单完成后帮助修改。",
+        signal_candidates=[
+            {
+                "candidate_id": "sig_001",
+                "text": "订单完成后帮助用户完成修改",
+                "speaker": "agent",
+                "evidence": "用户可以留下信息，在订单完成后帮助用户完成修改",
+            }
+        ],
+    )
+
+    assert messages[0]["role"] == "system"
+    assert "budget_signals" in messages[0]["content"]
+    assert "timeline_signals" in messages[0]["content"]
+    assert "next_steps" in messages[0]["content"]
+    assert '"candidate_id": "sig_001"' in messages[1]["content"]

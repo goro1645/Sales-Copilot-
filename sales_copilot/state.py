@@ -18,6 +18,7 @@ class SalesCopilotState(TypedDict, total=False):
     lead_priority: str
     opportunity_stage: str
     risk_flags: list[str]
+    task_candidates: list[dict[str, Any]]
     follow_up_plan: dict[str, Any]
     crm_update_payload: dict[str, Any]
     crm_update_ids: list[int]

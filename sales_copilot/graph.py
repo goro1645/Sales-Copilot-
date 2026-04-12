@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import inspect
 from datetime import date, timedelta
 from functools import partial
 from pathlib import Path
@@ -15,7 +16,9 @@ from sales_copilot.prompts import (
     build_lead_scoring_messages,
     build_meeting_parse_messages,
 )
+from sales_copilot.retrieval import hybrid_retrieve_knowledge_chunks
 from sales_copilot.state import SalesCopilotState
+from sales_copilot.task_candidates import build_task_candidates, build_tasks_from_candidates
 from sales_copilot.storage import (
     get_account_by_id,
     get_account_memory,
@@ -35,8 +38,6 @@ from sales_copilot.tools import (
     append_account_memory,
     get_open_tasks,
     search_account_history,
-    search_product_knowledge,
-    search_sales_playbook,
     update_crm_account,
 )
 
@@ -204,6 +205,25 @@ def _merge_task_payloads(*task_lists: list[dict[str, Any]] | None) -> list[dict[
     return merged
 
 
+def _tasks_need_candidate_merge(task_list: list[dict[str, Any]] | None) -> bool:
+    normalized_titles = {
+        str(task.get("title", "")).strip().lower()
+        for task in task_list or []
+        if isinstance(task, dict) and str(task.get("title", "")).strip()
+    }
+    if not normalized_titles:
+        return True
+    generic_titles = {
+        "follow up",
+        "clarify qualification gaps",
+        "schedule qualification follow-up",
+        "confirm budget range",
+        "confirm decision timeline",
+        "identify decision makers",
+    }
+    return normalized_titles.issubset(generic_titles)
+
+
 def _build_missing_fact_follow_up(state: SalesCopilotState) -> dict[str, Any]:
     # 这里把“信息不完整”翻译成销售可以执行的动作。
     # 这样工作台不会只会说“缺信息”，而是能直接落成待办任务。
@@ -282,6 +302,25 @@ def _augment_follow_up_payload_with_missing_facts(
     payload["tasks"] = _merge_task_payloads(payload.get("tasks", []), supplement["tasks"])
     existing_summary = str(payload.get("summary", "")).strip()
     payload["summary"] = f"{existing_summary} 同时，{supplement['summary']}" if existing_summary else supplement["summary"]
+    return payload
+
+
+def _merge_task_candidates_into_payload(
+    state: SalesCopilotState,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    candidate_tasks = build_tasks_from_candidates(list(state.get("task_candidates", [])))
+    existing_tasks = payload.get("tasks", [])
+    if _tasks_need_candidate_merge(existing_tasks):
+        payload["tasks"] = _merge_task_payloads(existing_tasks, candidate_tasks)
+    else:
+        payload["tasks"] = _merge_task_payloads(existing_tasks)
+    if not str(payload.get("summary", "")).strip() and state.get("task_candidates"):
+        payload["summary"] = "; ".join(
+            str(row.get("text", "")).strip()
+            for row in list(state.get("task_candidates", []))[:2]
+            if str(row.get("text", "")).strip()
+        )
     return payload
 
 
@@ -460,14 +499,36 @@ def parse_meeting_note_node(state: SalesCopilotState, *, llm_client, database_pa
     return _step_result(state, "parse_meeting_note", {"meeting_summary": payload})
 
 
-def retrieve_context_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
+def retrieve_context_node(
+    state: SalesCopilotState,
+    *,
+    llm_client=None,
+    database_path=None,
+    retrieval_embedder=None,
+) -> dict[str, Any]:
     del llm_client
     query_bits = _normalize_list((state.get("meeting_summary") or {}).get("confirmed_needs"))
     query = " ".join(query_bits).strip() or state.get("meeting_note_raw", "")
     docs: list[dict[str, Any]] = []
     if database_path is not None and query:
-        docs.extend(search_product_knowledge(database_path, query, top_k=2))
-        docs.extend(search_sales_playbook(database_path, query, top_k=2))
+        docs.extend(
+            hybrid_retrieve_knowledge_chunks(
+                database_path,
+                source_type="product",
+                query=query,
+                embedder=retrieval_embedder,
+                top_k=2,
+            )
+        )
+        docs.extend(
+            hybrid_retrieve_knowledge_chunks(
+                database_path,
+                source_type="playbook",
+                query=query,
+                embedder=retrieval_embedder,
+                top_k=2,
+            )
+        )
     account_id = state.get("account_id")
     if database_path is not None and account_id:
         docs.extend(search_account_history(database_path, account_id)[:2])
@@ -534,6 +595,7 @@ def evaluate_lead_node(state: SalesCopilotState, *, llm_client, database_path=No
 def need_more_info_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
     del llm_client, database_path
     follow_up_plan = _build_missing_fact_follow_up(state)
+    follow_up_plan = _merge_task_candidates_into_payload(state, follow_up_plan)
     return _step_result(
         state,
         "need_more_info",
@@ -547,6 +609,7 @@ def low_priority_nurture_node(state: SalesCopilotState, *, llm_client=None, data
         "summary": "放入低优先级培育流程，先推送轻量教育内容。",
         "tasks": [],
     }
+    follow_up_plan = _merge_task_candidates_into_payload(state, follow_up_plan)
     follow_up_plan = _augment_follow_up_payload_with_missing_facts(state, follow_up_plan)
     return _step_result(
         state,
@@ -560,11 +623,24 @@ def _build_followup_payload(state: SalesCopilotState, *, llm_client) -> dict[str
         meeting_summary=state.get("meeting_summary", {}),
         opportunity_stage=state.get("opportunity_stage", ""),
         risk_flags=_normalize_list(state.get("risk_flags")),
+        task_candidates=list(state.get("task_candidates", [])),
     )
     payload = _parse_json_object(llm_client.complete(messages, response_format={"type": "json_object"}))
     tasks = payload.get("tasks") or payload.get("task_payload") or []
     payload["tasks"] = tasks if isinstance(tasks, list) else []
+    payload = _merge_task_candidates_into_payload(state, payload)
     return _augment_follow_up_payload_with_missing_facts(state, payload)
+
+
+def build_task_candidates_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
+    del llm_client, database_path
+    candidates = build_task_candidates(
+        meeting_summary=state.get("meeting_summary", {}),
+        risk_flags=_normalize_list(state.get("risk_flags")),
+        lead_priority=str(state.get("lead_priority", "medium") or "medium"),
+        opportunity_stage=str(state.get("opportunity_stage", "discovery") or "discovery"),
+    )
+    return _step_result(state, "build_task_candidates", {"task_candidates": candidates})
 
 
 def standard_follow_up_node(state: SalesCopilotState, *, llm_client, database_path=None) -> dict[str, Any]:
@@ -834,36 +910,130 @@ def _bind_node(
     *,
     llm_client=None,
     database_path=None,
+    retrieval_embedder=None,
 ) -> Callable[[SalesCopilotState], dict[str, Any]]:
-    return partial(node, llm_client=llm_client, database_path=database_path)
+    kwargs = {"llm_client": llm_client, "database_path": database_path}
+    if "retrieval_embedder" in inspect.signature(node).parameters:
+        kwargs["retrieval_embedder"] = retrieval_embedder
+    return partial(node, **kwargs)
 
 
-def build_sales_copilot_graph(*, llm_client, database_path, mcp_client=None) -> Any:
+def build_sales_copilot_graph(*, llm_client, database_path, mcp_client=None, retrieval_embedder=None) -> Any:
     builder = StateGraph(SalesCopilotState)
 
-    builder.add_node("ingest_files", _bind_node(ingest_files_node, llm_client=llm_client, database_path=database_path))
-    builder.add_node("parse_meeting_note", _bind_node(parse_meeting_note_node, llm_client=llm_client, database_path=database_path))
-    builder.add_node("retrieve_context", _bind_node(retrieve_context_node, llm_client=llm_client, database_path=database_path))
-    builder.add_node("load_account_memory", _bind_node(load_account_memory_node, llm_client=llm_client, database_path=database_path))
-    builder.add_node("evaluate_lead", _bind_node(evaluate_lead_node, llm_client=llm_client, database_path=database_path))
-    builder.add_node("need_more_info", _bind_node(need_more_info_node, llm_client=llm_client, database_path=database_path))
-    builder.add_node("low_priority_nurture", _bind_node(low_priority_nurture_node, llm_client=llm_client, database_path=database_path))
-    builder.add_node("standard_follow_up", _bind_node(standard_follow_up_node, llm_client=llm_client, database_path=database_path))
-    builder.add_node("high_priority_follow_up", _bind_node(high_priority_follow_up_node, llm_client=llm_client, database_path=database_path))
+    builder.add_node(
+        "ingest_files",
+        _bind_node(
+            ingest_files_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
+    builder.add_node(
+        "parse_meeting_note",
+        _bind_node(
+            parse_meeting_note_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
+    builder.add_node(
+        "retrieve_context",
+        _bind_node(
+            retrieve_context_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
+    builder.add_node(
+        "load_account_memory",
+        _bind_node(
+            load_account_memory_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
+    builder.add_node(
+        "evaluate_lead",
+        _bind_node(
+            evaluate_lead_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
+    builder.add_node(
+        "build_task_candidates",
+        _bind_node(
+            build_task_candidates_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
+    builder.add_node(
+        "need_more_info",
+        _bind_node(
+            need_more_info_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
+    builder.add_node(
+        "low_priority_nurture",
+        _bind_node(
+            low_priority_nurture_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
+    builder.add_node(
+        "standard_follow_up",
+        _bind_node(
+            standard_follow_up_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
+    builder.add_node(
+        "high_priority_follow_up",
+        _bind_node(
+            high_priority_follow_up_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
     builder.add_node(
         "write_back_crm",
         partial(write_back_crm_node, llm_client=llm_client, database_path=database_path, mcp_client=mcp_client),
     )
-    builder.add_node("generate_dashboard_output", _bind_node(generate_dashboard_output_node, llm_client=llm_client, database_path=database_path))
+    builder.add_node(
+        "generate_dashboard_output",
+        _bind_node(
+            generate_dashboard_output_node,
+            llm_client=llm_client,
+            database_path=database_path,
+            retrieval_embedder=retrieval_embedder,
+        ),
+    )
 
     builder.set_entry_point("ingest_files")
     builder.add_edge("ingest_files", "parse_meeting_note")
     builder.add_edge("parse_meeting_note", "retrieve_context")
     builder.add_edge("retrieve_context", "load_account_memory")
     builder.add_edge("load_account_memory", "evaluate_lead")
+    builder.add_edge("evaluate_lead", "build_task_candidates")
 
     builder.add_conditional_edges(
-        "evaluate_lead",
+        "build_task_candidates",
         route_after_lead_evaluation,
         {
             "need_more_info": "need_more_info",

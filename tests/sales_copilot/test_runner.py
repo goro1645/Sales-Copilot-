@@ -11,7 +11,7 @@ from sales_copilot.storage import (
     list_meeting_records,
     list_tasks,
 )
-from sales_copilot.runner import run_sales_copilot
+from sales_copilot.runner import run_sales_copilot, run_sales_copilot_stream
 from sales_copilot.tools import get_open_tasks
 
 
@@ -91,6 +91,38 @@ class RefreshingLLM:
         raise AssertionError(f"Unexpected prompt: {prompt_text}")
 
 
+class FakeStreamingLLM(FakeLLM):
+    def stream(self, messages, tools=None):
+        del tools
+        self.calls.append(messages)
+        prompt_text = "\n".join(message["content"] for message in messages)
+        if "Parse the meeting notes" in prompt_text:
+            content = (
+                '{"account_name": "Acme Robotics", "customer_roles": ["CTO"], '
+                '"confirmed_needs": ["private deployment"], "objections": [], '
+                '"next_steps": ["send proposal"], "budget_signals": ["budget approved"], '
+                '"timeline_signals": ["this quarter"], "competitors": []}'
+            )
+        elif "Evaluate the lead" in prompt_text:
+            content = (
+                '{"lead_score": 88, "lead_priority": "high", "opportunity_stage": "proposal", '
+                '"risk_flags": [], "reasons": ["strong fit"], "evidence": ["confirmed need"]}'
+            )
+        elif "follow-up plan" in prompt_text.lower():
+            content = (
+                '{"summary": "Send proposal", "tasks": [{"title": "Send proposal", '
+                '"description": "Send tailored proposal", "priority": "high", '
+                '"due_at": "2026-04-03"}]}'
+            )
+        else:
+            raise AssertionError(f"Unexpected prompt: {prompt_text}")
+
+        midpoint = max(1, len(content) // 2)
+        yield {"type": "content_delta", "text": content[:midpoint]}
+        yield {"type": "content_delta", "text": content[midpoint:]}
+        yield {"type": "message_finished", "finish_reason": "stop"}
+
+
 class RecordingMCPClient:
     def __init__(self, inner_client) -> None:
         self.inner_client = inner_client
@@ -148,6 +180,52 @@ def test_run_sales_copilot_returns_dashboard_and_crm_ids(tmp_path: Path):
     assert result["lead_score"] == 88
     assert result["dashboard_output"]["account_name"] == "Acme Robotics"
     assert result["crm_update_ids"]
+
+
+def test_run_sales_copilot_stream_emits_workflow_and_node_events(tmp_path: Path):
+    events = list(
+        run_sales_copilot_stream(
+            customer_profile_text="Acme Robotics is a manufacturing company.",
+            meeting_note_text="CTO requested a proposal for private deployment.",
+            database_path=tmp_path / "sales.db",
+            llm_client=FakeStreamingLLM(),
+        )
+    )
+
+    event_types = [event["type"] for event in events]
+    assert event_types[0] == "workflow_started"
+    assert "node_started" in event_types
+    assert "state_patch" in event_types
+    assert event_types[-1] == "workflow_finished"
+
+    final_result = events[-1]["result"]
+    assert final_result["lead_priority"] == "high"
+    assert final_result["dashboard_output"]["account_name"] == "Acme Robotics"
+
+
+def test_run_sales_copilot_passes_default_embedder_into_graph(tmp_path: Path, monkeypatch):
+    captured = {}
+
+    class _FakeGraph:
+        def invoke(self, state):
+            return {"workflow_log": state["workflow_log"], "retrieved_docs": []}
+
+    monkeypatch.setattr("sales_copilot.runner.load_default_embedder", lambda: "EMBEDDER")
+
+    def _fake_build_sales_copilot_graph(**kwargs):
+        captured.update(kwargs)
+        return _FakeGraph()
+
+    monkeypatch.setattr("sales_copilot.runner.build_sales_copilot_graph", _fake_build_sales_copilot_graph)
+
+    run_sales_copilot(
+        customer_profile_text="Acme Robotics is a manufacturing company.",
+        meeting_note_text="CTO requested a proposal for private deployment.",
+        database_path=tmp_path / "sales.db",
+        llm_client=FakeLLM(),
+    )
+
+    assert captured["retrieval_embedder"] == "EMBEDDER"
 
 
 def test_run_sales_copilot_mcp_mode_uses_mcp_client_for_write_back(tmp_path: Path):

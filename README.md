@@ -1,368 +1,78 @@
-# Sales Copilot
+﻿# Sales Copilot
 
-LangGraph-based sales follow-up workflow agent with MCP-backed CRM tools, a local Streamlit workbench, and offline evaluation on the public real Chinese customer-service corpus `CSDS`.
+一个面向销售跟进场景的 LLM Agent 项目，输入客户资料与会议纪要，输出结构化解析、跟进建议、CRM 写回和待办任务。
 
-## What This Project Does
+项目重点不在单轮聊天，而在完整 workflow：结构化解析、检索增强、机会判断、任务生成、业务状态写回，以及对应的离线评测体系。
 
-This project focuses on the execution loop behind an enterprise sales copilot instead of a single-turn chat demo. It turns customer context and meeting notes into structured fields, lead signals, follow-up actions, CRM state updates, and task creation.
+## 项目简介
 
-The core workflow covers:
+这个项目尝试把“销售会议之后该怎么跟进”做成一个可运行、可观察、可评测的 Agent 系统。
 
-`customer profile -> meeting-note parsing -> lead scoring -> follow-up planning -> CRM write-back -> task creation`
+给定一段客户背景和会议纪要，系统会：
 
-## Highlights
+- 解析会议中的需求、时间线、预算和下一步动作
+- 检索产品知识和销售手册，为判断提供上下文
+- 生成机会阶段、风险信号和跟进建议
+- 把结果写回 CRM 状态与任务系统
+- 在本地工作台中展示流式执行过程和最终结果
 
-- Built a stateful sales follow-up workflow with `LangGraph`, including parsing, routing, follow-up planning, CRM write-back, and task generation.
-- Added a local `CRM/Tasks MCP` tool layer so the agent reads and writes business state through standardized tool calls instead of direct ad-hoc database updates.
-- Built a local `Streamlit + SQLite` workbench for inspecting lead score, stage, CRM updates, tasks, and workflow traces.
-- Designed customer-service-oriented parsing prompts and JSON schema constraints for fields such as `confirmed_needs`, `next_steps`, `budget_signals`, and `timeline_signals`.
-- Added offline evaluation pipelines for both self-built golden cases and public real customer-service data.
+## 核心能力
 
-## Evaluation
+- 结构化会议纪要解析：抽取 `confirmed_needs`、`next_steps`、`budget_signals`、`timeline_signals` 等关键信号
+- Hybrid RAG：结合产品知识和销售手册，为机会判断和跟进建议提供证据支撑
+- 基于 `task_candidates` 的任务生成：减少会议事实在最终待办生成中的丢失
+- CRM / Tasks 写回：将机会阶段、跟进建议和任务结果落入业务状态层
+- Streamlit 工作台与流式执行观察：支持查看 workflow 阶段、任务结果和调试信息
 
-### Public Real Corpus: CSDS
+## 系统流程
 
-The repository includes a `full-CSDS` parse-only evaluation path over the official `CSDS` dataset.
+`客户资料 -> 会议纪要解析 -> 检索上下文 -> 机会判断 -> 跟进计划 -> CRM / Tasks 写回`
 
-Latest validated result on the official `test` split (`800` samples):
+## 评测设计
 
-- `JSON valid rate = 100%`
-- `Average list-field F1 = 80.3%`
+项目同时使用公开数据集和自建评测集：
 
-Field groups include:
+- 公开数据集用于验证结构化解析质量
+- 自建评测集用于验证检索效果以及最终 workflow 输出质量
+- 评测覆盖解析、检索和最终业务输出三个层面
 
-- `confirmed_needs`
-- `next_steps`
-- `budget_signals`
-- `timeline_signals`
-- `customer_roles`
+首页不展开具体分数和内部 benchmark 命名，详细实验与复盘见下方文档链接。
 
-This evaluation is used to validate structured extraction quality on public real customer-service conversations rather than synthetic prompts.
+## 代码结构
 
-The parse-only evaluator also supports an optional DeepSeek second-pass reclassification mode for the weakest fields:
+- `sales_copilot/`：主 workflow、状态流转、检索、任务生成、流式接口
+- `evals/sales_copilot/`：结构化解析、检索与 workflow 评测
+- `scripts/`：运行、评测与本地工具脚本
+- `docs/`：复盘、设计文档与实现计划
 
-- `budget_signals`
-- `timeline_signals`
-- `next_steps`
+## 快速运行
 
-The current implementation uses a constrained DeepSeek tool-call path instead of freeform JSON classification output. The recommended validation flow is to run a small smoke evaluation first (for example `--limit 20`) and inspect the generated `case_results.jsonl` before any larger rerun.
-
-Run with:
-
-```powershell
-python scripts/run_sales_copilot_eval.py `
-  --dataset-kind full-csds `
-  --csds-data-dir /path/to/csds `
-  --csds-splits test `
-  --output-dir evals/sales_copilot/outputs_csds_full_reclass `
-  --mode offline `
-  --use-signal-reclassification
-```
-
-### Full-CSDS Gold Audit
-
-Because the `full-CSDS` benchmark adapts `UserSumm / AgentSumm / FinalSumm` into `expected_parse` with local rules, it should be treated as a weak benchmark rather than a fully human-verified gold set.
-
-To audit that weak-gold quality on a stratified sample from the official `test` split:
+1. 启动流式 API
 
 ```powershell
-python scripts/build_full_csds_gold_audit.py `
-  --csds-data-dir /path/to/csds `
-  --split test `
-  --output-dir evals/sales_copilot/outputs_csds_gold_audit
+python scripts/run_sales_copilot_stream_api.py --host 127.0.0.1 --port 8011
 ```
 
-This writes:
-
-- `full_csds_gold_audit_sample.jsonl`
-- `full_csds_gold_audit_summary.json`
-
-### Full-CSDS Calibrated-100
-
-To build a higher-trust benchmark on top of the weak `full-CSDS 800` evaluation, the repository also supports a `100`-case calibrated working set.
-
-This pipeline:
-
-- samples `100` review-value cases from `full-CSDS test`
-- preserves `meeting_note_text`, `UserSumm`, `AgentSumm`, and `FinalSumm`
-- includes the auto-generated weak gold as reference
-- seeds AI-assisted pre-annotation from an existing baseline `case_results.jsonl`
-- writes a working file for human review
-
-Generate the working set with:
+2. 启动本地工作台
 
 ```powershell
-& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\build_full_csds_calibrated_subset.py' `
-  --csds-data-dir 'D:\minimind\.worktrees\minimind-job-agent\tmp_csds_download' `
-  --split test `
-  --baseline-case-results 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_full_post_cache_move\20260410020844\case_results.jsonl' `
-  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_calibrated_100'
+python -m streamlit run scripts/sales_copilot_web_demo.py --server.port 8501
 ```
 
-This writes:
+3. 浏览器打开 `http://127.0.0.1:8501`
 
-- `full_csds_calibration_working_100.jsonl`
+## 进一步阅读
 
-After review, export the final calibrated benchmark with:
+- `docs/sales-copilot-retrospective.md`
+- `docs/superpowers/specs/`
+- `docs/superpowers/plans/`
 
-```powershell
-& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\build_full_csds_calibrated_subset.py' `
-  --export-final-from-working 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_calibrated_100\full_csds_calibration_working_100.jsonl' `
-  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_calibrated_100'
-```
+## 适合关注的内容
 
-This writes:
+如果你更关心 LLM / RAG / 评测能力，建议优先看：
 
-- `full_csds_calibrated_100.jsonl`
-
-### Full-CSDS AI-Calibrated-100
-
-The repository can also turn the `100`-case working set into an `AI-calibrated benchmark draft`.
-
-This path:
-
-- keeps the original working set intact
-- fills `human_review.final_expected_parse` with an AI-authored review block
-- exports `full_csds_ai_calibrated_100.jsonl`
-- should be described as `AI-calibrated`, not `human-calibrated`
-
-Generate the AI-reviewed working file and export the draft benchmark with:
-
-```powershell
-& 'D:\anaconda\envs\minimind_job_agent\python.exe' 'D:\minimind\.worktrees\minimind-job-agent\scripts\build_full_csds_calibrated_subset.py' `
-  --fill-ai-review-from-working 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_calibrated_100\full_csds_calibration_working_100.jsonl' `
-  --output-dir 'D:\minimind\.worktrees\minimind-job-agent\evals\sales_copilot\outputs_csds_calibrated_100'
-```
-
-This requires `DEEPSEEK_API_KEY` or `--api-key`.
-
-This writes:
-
-- `full_csds_calibration_working_100.ai_reviewed.jsonl`
-- `full_csds_ai_calibrated_100.jsonl`
-
-### Workflow Evaluation
-
-Workflow behaviors such as route selection, CRM write-back, and task creation are evaluated separately on self-built golden cases, because public customer-service corpora do not provide direct labels for sales workflow execution.
-
-### Retrieval Benchmark
-
-Sales Copilot includes a dedicated retrieval benchmark for the local product/playbook knowledge base.
-
-It compares:
-
-- `keyword_only`
-- `hybrid`
-- `hybrid_rerank`
-
-Metrics:
-
-- `Recall@1`
-- `Recall@3`
-- `Recall@5`
-- `MRR`
-
-There are now two retrieval case sets:
-
-- `retrieval_cases.jsonl`
-  - small sanity benchmark for baseline regression checks
-- `retrieval_cases_csds_hard.jsonl`
-  - `CSDS`-derived hard benchmark built from public real customer-service phrasing plus manual labels
-  - includes `product_hard`, `playbook_hard`, and `cross_source_confusing` buckets
-  - designed to show whether `hybrid_rerank` improves top-rank ordering over plain `hybrid`
-
-Run:
-
-```powershell
-python scripts/run_sales_copilot_retrieval_eval.py `
-  --cases evals/sales_copilot/retrieval_cases.jsonl `
-  --db-path data/sales_copilot/sales_copilot.db `
-  --output-dir evals/sales_copilot/outputs_retrieval
-```
-
-Run the CSDS-derived hard set:
-
-```powershell
-python scripts/run_sales_copilot_retrieval_eval.py `
-  --cases evals/sales_copilot/retrieval_cases_csds_hard.jsonl `
-  --db-path data/sales_copilot/sales_copilot.db `
-  --output-dir evals/sales_copilot/outputs_retrieval_hard
-```
-
-## System Design
-
-### Workflow Layer
-
-`sales_copilot/graph.py` orchestrates the end-to-end workflow:
-
-- parse meeting notes
-- retrieve account context
-- score lead state
-- plan follow-up actions
-- write CRM state
-- create tasks
-- prepare dashboard output
-
-### LLM Layer
-
-The project currently uses `DeepSeek API` for structured parsing and follow-up generation. Prompt templates are defined in:
-
-- `sales_copilot/prompts.py`
-
-### Hybrid Retrieval
-
-Sales Copilot now supports hybrid retrieval for product knowledge and sales playbook chunks.
-
-- Vector similarity is provided by `sentence-transformers`
-- Keyword retrieval remains as a deterministic fallback
-- Cached embeddings are stored in SQLite through `knowledge_chunk_embeddings`
-- The workflow demo path loads the default embedder through `sales_copilot/runner.py`
-- Direct graph tests can still force keyword-only retrieval to keep regression runs stable
-
-To rebuild cached embeddings:
-
-```powershell
-python scripts/rebuild_sales_copilot_embeddings.py --db-path data/sales_copilot/sales_copilot.db
-```
-
-### Cross-Encoder Reranker
-
-Sales Copilot now also supports a local second-stage reranker.
-
-- first-stage recall remains `keyword_only` or `hybrid`
-- second-stage reranking uses a lightweight local cross-encoder
-- benchmark mode name: `hybrid_rerank`
-
-This keeps retrieval architecture explicit:
-
-- recall finds the candidate set
-- reranking improves top-rank ordering inside that candidate set
-
-The reranker is optional at runtime and falls back to plain `hybrid` if the local model cannot be loaded.
-
-### MCP Tool Layer
-
-The local MCP-backed CRM tool path is used for:
-
-- account lookup
-- task lookup
-- task creation
-- account stage/status update
-
-This makes the agent easier to explain as an execution-oriented system rather than a text-only assistant.
-
-### stdio MCP Server
-
-The repository now also includes a real `stdio` MCP server entrypoint for the CRM/Tasks tool surface:
-
-- `sales_copilot/mcp_stdio_server.py`
-- `scripts/run_sales_copilot_mcp_server.py`
-
-The exposed tools are:
-
-- `get_account`
-- `list_account_tasks`
-- `create_task`
-- `update_account_stage`
-
-This path provides:
-
-- tool discovery
-- tool schema
-- standard tool invocation
-- real client-server validation over `stdio`
-
-### Local Workbench
-
-The local demo is built with:
-
-- `Streamlit` for the UI
-- `SQLite` for account/task/meeting persistence
-
-Main entrypoints:
-
-- `scripts/sales_copilot_web_demo.py`
-- `scripts/run_sales_copilot_eval.py`
-
-## Quick Start
-
-### 1. Environment
-
-Use the Python environment that contains the project dependencies and set:
-
-```powershell
-$env:DEEPSEEK_API_KEY="your_key"
-```
-
-### 2. Run the Local Demo
-
-```powershell
-python -m streamlit run scripts/sales_copilot_web_demo.py
-```
-
-### 2.5 Run the DeepSeek Streaming Tool-Call Demo
-
-This repository also includes a standalone DeepSeek official SSE demo that:
-
-- streams normal text deltas
-- streams `tool_calls`
-- executes local CRM/knowledge-style tools after streamed tool completion
-- sends the tool result back for a second streamed answer
-
-Run:
-
-```powershell
-python scripts/deepseek_stream_tool_demo.py
-```
-
-### 3. Run CSDS Evaluation
-
-For the official `CSDS` dataset:
-
-```powershell
-python scripts/run_sales_copilot_eval.py `
-  --dataset-kind full-csds `
-  --csds-data-dir /path/to/csds `
-  --csds-splits test `
-  --output-dir evals/sales_copilot/outputs_csds_full `
-  --mode offline
-```
-
-### 4. Run the stdio MCP Server
-
-Install the MCP SDK from the official PyPI index instead of the Tsinghua mirror if your network path is international:
-
-```powershell
-python -m pip install --index-url https://pypi.org/simple mcp
-```
-
-Then start the MCP server:
-
-```powershell
-python scripts/run_sales_copilot_mcp_server.py --db-path data/sales_copilot/sales_copilot.db
-```
-
-Notes:
-
-- The MCP SDK is treated as an optional runtime dependency for the stdio server path.
-- We do not force it into the main app startup path, so the existing Streamlit/FastAPI flows stay isolated from MCP transport concerns.
-- In the validated local environment, `mcp` works with `starlette==0.46.2`; avoid blindly upgrading `starlette` to `1.x` if you still rely on `fastapi==0.115.12`.
-
-## Repository Map
-
-- `sales_copilot/`: workflow, prompts, storage, MCP integration
-- `sales_copilot/mcp_stdio_server.py`: stdio MCP server wrapper
-- `scripts/sales_copilot_web_demo.py`: local Streamlit demo
-- `scripts/run_sales_copilot_eval.py`: offline evaluation entrypoint
-- `scripts/run_sales_copilot_mcp_server.py`: stdio MCP server entrypoint
-- `evals/sales_copilot/`: adapters, metrics, runners, evaluation outputs
-
-## Why This Repo Still Contains MiniMind
-
-This project was developed on top of the `MiniMind` codebase and keeps the relevant local-model and serving utilities for reproducibility. The repository homepage is rewritten to foreground the `Sales Copilot` application layer, while upstream training and serving components remain available in the codebase.
-
-## Acknowledgement
-
-This work is built on top of the open-source `MiniMind` project:
-
-- [MiniMind upstream repository](https://github.com/jingyaogong/minimind)
+- `sales_copilot/graph.py`
+- `sales_copilot/retrieval.py`
+- `sales_copilot/task_candidates.py`
+- `evals/sales_copilot/metrics.py`
+- `evals/sales_copilot/workflow_quality_judge.py`

@@ -1,3 +1,11 @@
+"""Prompt builders for the main Sales Copilot workflow.
+
+This file is the contract between workflow state and model outputs:
+- parse prompt defines the structured meeting-summary schema
+- lead-scoring prompt defines score / stage / risks
+- follow-up prompt defines how task candidates become final tasks
+"""
+
 import json
 
 
@@ -13,6 +21,7 @@ def build_meeting_parse_messages(
     customer_profile_text: str,
     meeting_note_text: str,
 ) -> list[dict[str, str]]:
+    # parse 阶段把会议纪要转成结构化字段，后面的 RAG、打分、任务生成都依赖这一层事实抽取。
     system_prompt = (
         "You are a sales copilot. The customer profile is background only for disambiguation, "
         "not a source of facts. Extract facts from the meeting note first. "
@@ -54,6 +63,7 @@ def build_lead_scoring_messages(
     retrieved_docs: list[dict],
     account_memory: dict,
 ) -> list[dict[str, str]]:
+    # lead scoring 不是手工规则打分，而是模型基于会议摘要、RAG 结果和账户记忆做判断。
     system_prompt = (
         "You are a sales copilot. Score leads from the provided evidence only. "
         "Return valid JSON only. Do not invent missing details. "
@@ -90,6 +100,7 @@ def build_followup_plan_messages(
     risk_flags: list[str],
     task_candidates: list[dict],
 ) -> list[dict[str, str]]:
+    # follow-up prompt 不让模型从空白开始想任务，而是要求优先消费 `task_candidates`。
     system_prompt = (
         "You are a sales copilot. Create a follow-up plan from the evidence only. "
         "Return valid JSON only. Do not hallucinate."

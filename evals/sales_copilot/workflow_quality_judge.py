@@ -1,3 +1,11 @@
+"""LLM judge prompts and parsers for workflow quality review.
+
+This module focuses on the final quality of CRM write-back and generated tasks.
+It intentionally separates two judging stages:
+1. Stage 1: independent business-quality review from original context + actual output
+2. Stage 2: benchmark-alignment review that explains the delta against expected output
+"""
+
 from __future__ import annotations
 
 import json
@@ -28,6 +36,7 @@ def build_stage1_messages(
     actual_generated_tasks: list[dict[str, Any]],
     customer_profile_text: str = "",
 ) -> list[dict[str, str]]:
+    # Stage 1 不看 benchmark，只看“这份 CRM / task 输出在业务上能不能用”。
     payload = {
         "case_id": case_id,
         "meeting_note_text": meeting_note_text,
@@ -62,6 +71,7 @@ def build_stage2_messages(
     stage1_result: dict[str, Any],
     customer_profile_text: str = "",
 ) -> list[dict[str, str]]:
+    # Stage 2 才引入 expected_workflow，用来解释和 benchmark 的偏差，不重写 Stage 1 分数。
     payload = {
         "case_id": case_id,
         "meeting_note_text": meeting_note_text,
@@ -202,6 +212,10 @@ def _ensure_string_list(value: Any, label: str) -> list[str]:
 
 
 def parse_stage1_result(payload: dict[str, Any]) -> dict[str, Any]:
+    # Stage 1 结果是 1-5 的子项分数：
+    # - CRM correctness / usability
+    # - task structure / execution quality
+    # - overall score / verdict
     crm = payload["crm_writeback"]
     task = payload["task_generation"]
     overall = payload["overall"]
@@ -227,6 +241,7 @@ def parse_stage1_result(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_stage2_alignment(payload: dict[str, Any]) -> dict[str, Any]:
+    # Stage 2 只补 alignment 解释，不参与“业务是否可接受”的独立判断。
     alignment = payload["benchmark_alignment"]
     return {
         "benchmark_alignment": {
@@ -256,6 +271,9 @@ def parse_judge_result(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class WorkflowQualityJudge:
+    # judge 封装负责：
+    # 1) 调 Stage 1 获取独立业务评价
+    # 2) 调 Stage 2 获取和 benchmark 的差异说明
     def __init__(self, llm_client, *, max_retries: int = 2) -> None:
         self._llm_client = llm_client
         self._max_retries = max_retries

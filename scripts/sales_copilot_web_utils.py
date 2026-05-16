@@ -1,8 +1,86 @@
 from __future__ import annotations
 
 import html
+import json
 from collections.abc import Iterable
 from typing import Any
+
+from sales_copilot.stream_cli import render_stream_event
+
+
+STREAM_PROGRESS_STEPS: list[tuple[str, str]] = [
+    ("context", "Context"),
+    ("parse", "Parse"),
+    ("retrieve", "Retrieve"),
+    ("score", "Score"),
+    ("plan", "Plan"),
+    ("finalize", "Finalize"),
+]
+
+NODE_TO_PROGRESS_STAGE = {
+    "ingest_files": "context",
+    "load_account_memory": "context",
+    "parse_meeting_note": "parse",
+    "retrieve_context": "retrieve",
+    "evaluate_lead": "score",
+    "build_task_candidates": "plan",
+    "standard_follow_up": "plan",
+    "high_priority_follow_up": "plan",
+    "need_more_info": "plan",
+    "low_priority_nurture": "plan",
+    "write_back_crm": "finalize",
+    "generate_dashboard_output": "finalize",
+}
+
+STAGE_DESCRIPTIONS = {
+    "context": "Preparing customer context and workspace state.",
+    "parse": "Extracting structured facts from the meeting notes.",
+    "retrieve": "Looking up supporting knowledge and account history.",
+    "score": "Scoring opportunity priority, stage, and risks.",
+    "plan": "Building next steps, CRM updates, and task candidates.",
+    "finalize": "Writing outputs back and assembling the dashboard.",
+}
+
+
+def _copy_progress_state(progress_state: dict[str, Any]) -> dict[str, Any]:
+    copied = dict(progress_state)
+    copied["completed_stages"] = list(progress_state.get("completed_stages", []))
+    return copied
+
+
+def _stage_label(stage: str) -> str:
+    for key, label in STREAM_PROGRESS_STEPS:
+        if key == stage:
+            return label
+    return "Workflow"
+
+
+def _summarize_state_patch(node: str, patch: dict[str, Any]) -> str:
+    if node == "retrieve_context":
+        doc_count = patch.get("retrieved_doc_count")
+        if doc_count is None:
+            docs = patch.get("retrieved_docs")
+            doc_count = len(docs) if isinstance(docs, list) else 0
+        return f"Found {doc_count} supporting document(s)."
+    if node == "evaluate_lead":
+        priority = _normalize_text(patch.get("lead_priority"), "unknown")
+        stage = _normalize_text(patch.get("opportunity_stage"), "unknown")
+        return f"Priority {priority}, stage {stage}."
+    if node == "build_task_candidates":
+        candidates = patch.get("task_candidates") or []
+        count = len(candidates) if isinstance(candidates, list) else 0
+        return f"Prepared {count} task candidate(s)."
+    if node in {"standard_follow_up", "high_priority_follow_up", "need_more_info", "low_priority_nurture"}:
+        task_payload = patch.get("task_payload") or []
+        count = len(task_payload) if isinstance(task_payload, list) else 0
+        return f"Drafted {count} follow-up task(s)."
+    if node == "write_back_crm":
+        crm_ids = patch.get("crm_update_ids") or []
+        count = len(crm_ids) if isinstance(crm_ids, list) else 0
+        return f"Prepared {count} CRM update(s)."
+    if node == "generate_dashboard_output":
+        return "Final dashboard output is ready."
+    return STAGE_DESCRIPTIONS.get(NODE_TO_PROGRESS_STAGE.get(node, ""), "Processing workflow data.")
 
 
 def escape_html_text(value: Any) -> str:
@@ -176,6 +254,160 @@ def clear_run_result_state(session_state: dict[str, Any], error_message: str) ->
 
     session_state["last_result"] = None
     session_state["last_error"] = error_message
+
+
+def default_stream_progress_state() -> dict[str, Any]:
+    return {
+        "status": "idle",
+        "current_stage": "",
+        "current_node": "",
+        "completed_stages": [],
+        "headline": "Ready to run",
+        "detail": "Run the copilot to watch stage-by-stage progress.",
+        "error_message": "",
+    }
+
+
+def apply_stream_event_to_progress_state(progress_state: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+    state = _copy_progress_state(progress_state)
+    event_type = _normalize_text(event.get("type"), "")
+    node = _normalize_text(event.get("node"), "")
+    stage = NODE_TO_PROGRESS_STAGE.get(node, state.get("current_stage", ""))
+
+    if event_type == "workflow_started":
+        state["status"] = "running"
+        state["headline"] = "Starting workflow"
+        state["detail"] = "Preparing customer context and workflow state."
+        state["error_message"] = ""
+        return state
+
+    if event_type == "node_started":
+        state["status"] = "running"
+        state["current_stage"] = stage
+        state["current_node"] = node
+        state["headline"] = f"{_stage_label(stage)} in progress"
+        state["detail"] = STAGE_DESCRIPTIONS.get(stage, "Processing workflow data.")
+        return state
+
+    if event_type == "state_patch":
+        if stage:
+            state["current_stage"] = stage
+        state["current_node"] = node or state.get("current_node", "")
+        state["detail"] = _summarize_state_patch(node, event.get("patch") or {})
+        return state
+
+    if event_type == "node_finished":
+        if stage and stage not in state["completed_stages"]:
+            state["completed_stages"].append(stage)
+        state["current_stage"] = stage or state.get("current_stage", "")
+        state["current_node"] = node
+        state["headline"] = f"{_stage_label(stage)} complete" if stage else "Step complete"
+        state["detail"] = _summarize_state_patch(node, {})
+        return state
+
+    if event_type == "workflow_finished":
+        state["status"] = "completed"
+        state["headline"] = "Workflow complete"
+        state["detail"] = "Dashboard, CRM preview, and tasks are ready."
+        state["current_stage"] = "finalize"
+        for stage_key, _label in STREAM_PROGRESS_STEPS:
+            if stage_key not in state["completed_stages"]:
+                state["completed_stages"].append(stage_key)
+        return state
+
+    if event_type == "error":
+        state["status"] = "failed"
+        state["headline"] = "Run failed"
+        state["error_message"] = _normalize_text(event.get("message"), "Workflow failed.")
+        state["detail"] = state["error_message"]
+        return state
+
+    return state
+
+
+def build_progress_panel_html(progress_state: dict[str, Any]) -> str:
+    status = _normalize_text(progress_state.get("status"), "idle")
+    completed = set(_normalize_list_like(progress_state.get("completed_stages")))
+    current_stage = _normalize_text(progress_state.get("current_stage"), "")
+
+    if status == "completed":
+        status_label = "Completed"
+        status_class = "status-complete"
+    elif status == "failed":
+        status_label = "Failed"
+        status_class = "status-failed"
+    elif status == "running":
+        status_label = "Running"
+        status_class = "status-running"
+    else:
+        status_label = "Idle"
+        status_class = "status-idle"
+
+    step_html = []
+    for stage_key, label in STREAM_PROGRESS_STEPS:
+        if status == "completed" or stage_key in completed:
+            step_class = "progress-step is-complete"
+        elif stage_key == current_stage and status == "running":
+            step_class = "progress-step is-current"
+        else:
+            step_class = "progress-step"
+        step_html.append(f'<span class="{step_class}">{escape_html_text(label)}</span>')
+
+    error_message = _normalize_text(progress_state.get("error_message"), "")
+    if error_message:
+        detail_html = f'<div class="progress-error">{escape_html_text(error_message)}</div>'
+    else:
+        detail_html = f'<div class="progress-detail">{escape_html_text(_normalize_text(progress_state.get("detail"), ""))}</div>'
+
+    return (
+        '<div class="progress-shell">'
+        f'<div class="progress-status-row"><span class="progress-status-pill {status_class}">{escape_html_text(status_label)}</span>'
+        f'<span class="progress-headline">{escape_html_text(_normalize_text(progress_state.get("headline"), "Workflow progress"))}</span></div>'
+        f'<div class="progress-steps">{"".join(step_html)}</div>'
+        f"{detail_html}"
+        "</div>"
+    )
+
+
+def build_stream_api_payload(
+    *,
+    customer_profile_text: str,
+    meeting_note_text: str,
+    database_path: str,
+    execution_mode: str,
+    api_key: str,
+    api_base_url: str,
+    api_model: str,
+) -> dict[str, Any]:
+    return {
+        "customer_profile_text": customer_profile_text,
+        "meeting_note_text": meeting_note_text,
+        "database_path": database_path,
+        "execution_mode": execution_mode,
+        "api_key": api_key,
+        "api_base_url": api_base_url,
+        "api_model": api_model,
+    }
+
+
+def parse_sse_event_block(block: str) -> dict[str, Any] | None:
+    lines = [line.strip() for line in block.splitlines() if line.strip()]
+    data_line = next((line for line in lines if line.startswith("data:")), None)
+    if data_line is None:
+        return None
+    payload = data_line[len("data:") :].strip()
+    if not payload:
+        return None
+    return json.loads(payload)
+
+
+def append_stream_log_line(log_text: str, event: dict[str, Any]) -> str:
+    line = render_stream_event(event)
+    if not line:
+        return log_text
+    if not log_text:
+        return line
+    return f"{log_text}\n{line}"
 
 
 def build_dashboard_cards(result: dict) -> dict[str, str]:

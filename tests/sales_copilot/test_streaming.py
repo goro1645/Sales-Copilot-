@@ -13,6 +13,18 @@ class _FakeStreamingLLM:
         yield {"type": "message_finished", "finish_reason": "stop"}
 
 
+class _FakeStreamingLLMWithResponseFormat:
+    def __init__(self) -> None:
+        self.response_format = None
+
+    def stream(self, messages, tools=None, response_format=None):
+        del messages, tools
+        self.response_format = response_format
+        yield {"type": "content_delta", "text": '{"ok":'}
+        yield {"type": "content_delta", "text": 'true}'}
+        yield {"type": "message_finished", "finish_reason": "stop"}
+
+
 class _FakeCompleteOnlyLLM:
     def complete(self, messages, response_format=None):
         del messages, response_format
@@ -60,6 +72,23 @@ def test_stream_llm_completion_forwards_stream_events_and_returns_joined_text():
         {"type": "content_delta", "node": "parse_meeting_note", "text": "lo"},
         {"type": "message_finished", "node": "parse_meeting_note", "finish_reason": "stop"},
     ]
+
+
+def test_stream_llm_completion_forwards_response_format_to_streaming_clients():
+    client = _FakeStreamingLLMWithResponseFormat()
+
+    events, content = _drain_stream(
+        stream_llm_completion(
+            llm_client=client,
+            node="parse_meeting_note",
+            messages=[{"role": "user", "content": "hi"}],
+            response_format={"type": "json_object"},
+        )
+    )
+
+    assert content == '{"ok":true}'
+    assert client.response_format == {"type": "json_object"}
+    assert events[-1] == {"type": "message_finished", "node": "parse_meeting_note", "finish_reason": "stop"}
 
 
 def test_stream_llm_completion_falls_back_to_complete_when_stream_is_missing():

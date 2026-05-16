@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from evals.sales_copilot.candidate_span_refiner import refine_parse_result_with_candidates
 from evals.sales_copilot.csds_adapter import CSDSCase, load_csds_cases, load_full_csds_cases
 from evals.sales_copilot.metrics import evaluate_parse_case, summarize_parse_metrics
+from evals.sales_copilot.signal_reclassifier import reclassify_parse_result
 from sales_copilot.graph import parse_meeting_note_node
 
 
@@ -24,13 +26,39 @@ def _run_parse_step(case: CSDSCase, *, llm_client) -> dict[str, Any]:
     return meeting_summary
 
 
-def _build_case_result(case: CSDSCase, *, llm_client) -> dict[str, Any]:
-    errors: list[str] = []
+def _build_case_result(
+    case: CSDSCase,
+    *,
+    llm_client,
+    use_signal_reclassification: bool = False,
+    use_candidate_generation_refinement: bool = False,
+) -> dict[str, Any]:
+    parse_errors: list[str] = []
+    reclassification_errors: list[str] = []
     parse_result: dict[str, Any] = {}
     try:
         parse_result = _run_parse_step(case, llm_client=llm_client)
     except Exception as exc:
-        errors.append(f"parse error: {exc}")
+        parse_errors.append(f"parse error: {exc}")
+
+    if use_candidate_generation_refinement and parse_result:
+        try:
+            parse_result = refine_parse_result_with_candidates(
+                parse_result,
+                meeting_note_text=case["meeting_note_text"],
+                llm_client=llm_client,
+            )
+        except Exception as exc:
+            reclassification_errors.append(f"candidate refinement error: {exc}")
+    elif use_signal_reclassification and parse_result:
+        try:
+            parse_result = reclassify_parse_result(
+                parse_result,
+                llm_client=llm_client,
+                source_note=case["source_note"],
+            )
+        except Exception as exc:
+            reclassification_errors.append(f"signal reclassification error: {exc}")
 
     return {
         "case_id": case["case_id"],
@@ -43,17 +71,35 @@ def _build_case_result(case: CSDSCase, *, llm_client) -> dict[str, Any]:
         "expected_workflow": case["expected_workflow"],
         "parse_result": parse_result,
         "parse_metrics": evaluate_parse_case(case, parse_result),
-        "errors": errors,
-        "error": "; ".join(errors),
+        "parse_errors": parse_errors,
+        "reclassification_errors": reclassification_errors,
+        "errors": parse_errors,
+        "error": "; ".join(parse_errors),
+        "reclassification_error": "; ".join(reclassification_errors),
     }
 
 
-def run_csds_parse_evaluation(cases_path, output_dir, llm_client) -> dict[str, Any]:
+def run_csds_parse_evaluation(
+    cases_path,
+    output_dir,
+    llm_client,
+    *,
+    use_signal_reclassification: bool = False,
+    use_candidate_generation_refinement: bool = False,
+) -> dict[str, Any]:
     cases_file = Path(cases_path)
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
 
-    case_results = [_build_case_result(case, llm_client=llm_client) for case in load_csds_cases(cases_file)]
+    case_results = [
+        _build_case_result(
+            case,
+            llm_client=llm_client,
+            use_signal_reclassification=use_signal_reclassification,
+            use_candidate_generation_refinement=use_candidate_generation_refinement,
+        )
+        for case in load_csds_cases(cases_file)
+    ]
     return {
         "cases_path": str(cases_file),
         "output_dir": str(output_root),
@@ -67,13 +113,27 @@ def run_csds_parse_evaluation(cases_path, output_dir, llm_client) -> dict[str, A
     }
 
 
-def run_full_csds_parse_evaluation(dataset_dir, output_dir, llm_client, *, splits: list[str] | None = None, limit: int | None = None) -> dict[str, Any]:
+def run_full_csds_parse_evaluation(
+    dataset_dir,
+    output_dir,
+    llm_client,
+    *,
+    splits: list[str] | None = None,
+    limit: int | None = None,
+    use_signal_reclassification: bool = False,
+    use_candidate_generation_refinement: bool = False,
+) -> dict[str, Any]:
     dataset_root = Path(dataset_dir)
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
 
     case_results = [
-        _build_case_result(case, llm_client=llm_client)
+        _build_case_result(
+            case,
+            llm_client=llm_client,
+            use_signal_reclassification=use_signal_reclassification,
+            use_candidate_generation_refinement=use_candidate_generation_refinement,
+        )
         for case in load_full_csds_cases(dataset_root, splits=splits, limit=limit)
     ]
     return {

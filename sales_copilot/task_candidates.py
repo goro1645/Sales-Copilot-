@@ -1,3 +1,10 @@
+"""Programmatic task-candidate builder for fact-preserving task generation.
+
+This module sits between parse results and final task generation:
+- `build_task_candidates(...)` extracts likely action items from structured facts
+- `build_tasks_from_candidates(...)` turns those candidates into task-shaped rows
+"""
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -12,6 +19,8 @@ ACTION_NEED_MARKERS = (
     "integration",
     "demo",
 )
+# 只有一部分 confirmed_needs 会进一步转成任务候选。
+# 这些 marker 更接近“已经能落成动作”的 need，例如报价、安全材料、集成准备、demo 等。
 
 
 def _normalize_list(value: Any) -> list[str]:
@@ -82,16 +91,19 @@ def build_task_candidates(
     lead_priority: str,
     opportunity_stage: str,
 ) -> list[dict[str, Any]]:
+    # `next_steps` 是最直接的任务候选来源，因为它们已经在回答“接下来要做什么”。
     next_steps = _dedupe(_normalize_list(meeting_summary.get("next_steps")))
     confirmed_needs = _normalize_list(meeting_summary.get("confirmed_needs"))
     candidate_texts = list(next_steps)
 
+    # `confirmed_needs` 只在明显带行动倾向时才升格成候选，避免把所有需求都硬转成任务。
     for need in confirmed_needs:
         lowered = need.lower()
         if any(token in lowered for token in ACTION_NEED_MARKERS):
             candidate_texts.append(need)
 
     lowered_risks = {flag.lower() for flag in risk_flags}
+    # 某些风险标签也会触发补信息任务，例如缺失决策人。
     if "stakeholder_missing" in lowered_risks:
         candidate_texts.append("identify missing decision makers")
 
@@ -112,6 +124,7 @@ def build_task_candidates(
 
 
 def build_tasks_from_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # 这一步仍然是程序整理，不是再起一轮 LLM。
     tasks: list[dict[str, Any]] = []
     for row in candidates:
         text = str(row.get("text", "")).strip()

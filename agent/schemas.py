@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
@@ -13,4 +13,4 @@ class ApplicationRecord(BaseModel):
     resume_version: str
     cover_letter: str
     # We generate the timestamp inside the model so every saved record has a uniform shape.
-    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"))

@@ -10,16 +10,18 @@ from sales_copilot.storage import (
     update_account_stage_and_status,
 )
 
+SUPPORTED_TOOLS = (
+    "get_account",
+    "list_account_tasks",
+    "create_task",
+    "update_account_stage",
+)
+
 
 class SalesCopilotMCPServer:
     def __init__(self, db_path):
         self.db_path = Path(db_path)
-        self.supported_tools = (
-            "get_account",
-            "list_account_tasks",
-            "create_task",
-            "update_account_stage",
-        )
+        self.supported_tools = SUPPORTED_TOOLS
 
     def call_tool(self, tool_name: str, arguments: dict | None = None):
         arguments = arguments or {}

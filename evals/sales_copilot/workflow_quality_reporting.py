@@ -1,3 +1,11 @@
+"""Workflow-quality report aggregation for LLM-judge outputs.
+
+This file is where judge scores become the headline rates we talk about later:
+- `overall_acceptable_rate`
+- `crm_acceptable_rate`
+- `task_acceptable_rate`
+"""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -7,6 +15,10 @@ from typing import Any
 
 
 def summarize_workflow_quality_results(case_results: list[dict[str, Any]]) -> dict[str, Any]:
+    # 这些 acceptable rate 不是模型直接输出的，而是从 judge 的 1-5 分数阈值汇总出来的：
+    # - overall_acceptable_rate: overall_score >= 3
+    # - crm_acceptable_rate: crm_business_usability_score >= 3
+    # - task_acceptable_rate: task_execution_quality_score >= 3
     judged = [row["judge_result"] for row in case_results if isinstance(row.get("judge_result"), dict)]
     if not judged:
         return {
@@ -55,6 +67,7 @@ def summarize_workflow_quality_results(case_results: list[dict[str, Any]]) -> di
 
 
 def _build_workflow_quality_report_markdown(bundle: dict[str, Any]) -> str:
+    # workflow quality report 更接近“最终产品输出是否可用”的汇总视图。
     summary = bundle.get("summary", {})
     quality = summary.get("workflow_quality", {})
     lines = [
@@ -105,6 +118,7 @@ def _build_workflow_quality_report_markdown(bundle: dict[str, Any]) -> str:
 
 
 def write_workflow_quality_report_bundle(bundle: dict[str, Any], output_root: Path | str) -> str:
+    # 和 parse/workflow 报告一样，每次单独落盘，方便比较 baseline / RAG / task-candidates 等方案。
     root = Path(output_root)
     root.mkdir(parents=True, exist_ok=True)
     report_dir = root / dt.datetime.now().strftime("%Y%m%d%H%M%S")

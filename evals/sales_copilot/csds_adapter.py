@@ -57,22 +57,52 @@ _FULL_CSDS_SPLITS = ("train", "val", "test")
 _TIMELINE_PATTERNS = (
     r"\d+个工作日",
     r"\d+天",
+    r"\d+小时",
+    r"\d+分钟",
     r"明天",
     r"今天",
     r"次日",
+    r"很快",
+    r"马上",
+    r"稍后",
+    r"尽快",
+    r"回电",
+    r"回复",
+    r"确认收货后",
+    r"收货后",
+    r"退回后",
+    r"退款后",
     r"审核后",
     r"到账",
+    r"未到账",
     r"配送",
     r"送达",
+    r"发货",
+    r"结束",
+)
+_USER_TIMELINE_PATTERNS = (
+    r"马上",
+    r"尽快",
+    r"今天",
+    r"明天",
+    r"次日",
+    r"\d+点",
+    r"结束",
+    r"截止",
 )
 _BUDGET_PATTERNS = (
     r"金额",
     r"优惠券",
+    r"优惠",
     r"佣金",
     r"扣费",
     r"充值",
     r"税点",
     r"差价",
+    r"价保",
+    r"退款",
+    r"运费",
+    r"发票",
     r"余额",
 )
 
@@ -191,6 +221,47 @@ def _extract_signal_lines(lines: list[str], patterns: tuple[str, ...]) -> list[s
     return result
 
 
+def _merge_signal_lines(*groups: list[str]) -> list[str]:
+    merged: list[str] = []
+    for group in groups:
+        merged.extend(group)
+    return _dedupe_keep_order(merged)
+
+
+def _service_side_lines(lines: list[str]) -> list[str]:
+    return [line for line in lines if line.startswith("客服")]
+
+
+def _extract_timeline_signal_lines(user_summ: list[str], agent_summ: list[str], final_summ: list[str]) -> list[str]:
+    # 用户侧只保留“紧急程度/明确时间点”这类时效信号，避免把普通的“多久到账”问句
+    # 误当成 timeline gold；客服侧则保留处理时点、状态条件和等待窗口。
+    final_service_lines = _service_side_lines(final_summ)
+    return _merge_signal_lines(
+        _extract_signal_lines(user_summ, _USER_TIMELINE_PATTERNS),
+        _extract_signal_lines(agent_summ, _TIMELINE_PATTERNS),
+        _extract_signal_lines(final_service_lines, _TIMELINE_PATTERNS),
+    )
+
+
+def _build_role_scoped_meeting_note(
+    account_name: str,
+    *,
+    user_summ: list[str],
+    agent_summ: list[str],
+    final_summ: list[str],
+) -> str:
+    # full-CSDS 的 gold 来自用户/客服两侧摘要，因此评测输入也显式保留角色分层，
+    # 避免模型只看到合并后的 FinalSumm，丢失“谁提出需求、谁给出处理动作”的边界。
+    sections = [f"账户：{account_name}"]
+    if user_summ:
+        sections.append("用户摘要：\n" + "\n".join(f"- {line}" for line in user_summ))
+    if agent_summ:
+        sections.append("客服处理：\n" + "\n".join(f"- {line}" for line in agent_summ))
+    if final_summ:
+        sections.append("会话总结：\n" + "\n".join(f"- {line}" for line in final_summ))
+    return "\n".join(sections)
+
+
 def _build_full_csds_case(payload: dict[str, Any], *, split: str) -> CSDSCase:
     dialogue_id = str(payload.get("DialogueID", "")).strip()
     if not dialogue_id:
@@ -200,25 +271,37 @@ def _build_full_csds_case(payload: dict[str, Any], *, split: str) -> CSDSCase:
     agent_summ = _normalize_text_list(payload.get("AgentSumm", []))
     final_summ = _normalize_text_list(payload.get("FinalSumm", []))
     account_name = _service_account_name(qrole)
+    final_service_lines = _service_side_lines(final_summ)
+    budget_signals = _merge_signal_lines(
+        _extract_signal_lines(agent_summ, _BUDGET_PATTERNS),
+        _extract_signal_lines(final_service_lines, _BUDGET_PATTERNS),
+    )
+    timeline_signals = _extract_timeline_signal_lines(user_summ, agent_summ, final_summ)
+    next_steps = agent_summ or final_service_lines
     return {
         "case_id": f"csds_full_{split}_{dialogue_id}",
         "segment": "customer_service_parse_only",
         "source_dataset": "CSDS",
         "source_uid": dialogue_id,
         "source_split": split,
-        "source_note": "Official CSDS customer-service dialogue. Automatically adapted from UserSumm/AgentSumm/FinalSumm into parse-only evaluation input.",
+        "source_note": "Official CSDS customer-service dialogue. Automatically adapted from role-scoped UserSumm/AgentSumm/FinalSumm into parse-only evaluation input.",
         "customer_profile_text": (
             f"来源数据集：CSDS（公开真实中文客服对话语料）。账户名称：{account_name}。"
             f"会话角色：{qrole}、客服。场景：官方CSDS全量样本。"
         ),
-        "meeting_note_text": f"账户：{account_name}\n会话摘要：\n" + "\n".join(f"- {line}" for line in final_summ),
+        "meeting_note_text": _build_role_scoped_meeting_note(
+            account_name,
+            user_summ=user_summ,
+            agent_summ=agent_summ,
+            final_summ=final_summ,
+        ),
         "expected_parse": {
             "account_name": account_name,
             "customer_roles": _dedupe_keep_order([qrole, "客服"]),
             "confirmed_needs": user_summ,
-            "budget_signals": _extract_signal_lines(agent_summ, _BUDGET_PATTERNS),
-            "timeline_signals": _extract_signal_lines(agent_summ, _TIMELINE_PATTERNS),
-            "next_steps": agent_summ,
+            "budget_signals": budget_signals,
+            "timeline_signals": timeline_signals,
+            "next_steps": next_steps,
             "competitors": [],
         },
         "expected_workflow": {"required_risk_flags": []},

@@ -1,3 +1,12 @@
+"""Retrieval utilities for Sales Copilot knowledge lookup.
+
+This module implements the project's retrieval stack:
+- keyword retrieval for exact business terms
+- vector retrieval for semantic recall
+- hybrid fusion as the default first-stage retriever
+- optional reranker for second-stage reordering
+"""
+
 from __future__ import annotations
 
 import logging
@@ -48,6 +57,7 @@ class SentenceTransformerEmbedder:
 
 @lru_cache(maxsize=2)
 def load_default_embedder() -> SentenceTransformerEmbedder | None:
+    # 默认向量检索模型。加载失败时会优雅回退到 keyword-only retrieval。
     try:
         return SentenceTransformerEmbedder()
     except Exception as exc:  # pragma: no cover - depends on local model availability
@@ -83,6 +93,10 @@ def _normalize_dense_scores(scores: list[float]) -> list[float]:
 
 
 def hybrid_retrieve_rows(query: str, rows: list[dict], *, embedder: Embedder | None, top_k: int = 3) -> list[dict]:
+    # first-stage hybrid retrieval:
+    # - keyword score 保证显式词命中
+    # - vector score 保证语义召回
+    # - hybrid_score = 0.7 * vector + 0.3 * keyword
     keyword_rows = keyword_retrieve(query, rows, top_k=max(top_k, len(rows)))
     keyword_score_map = _normalize_keyword_scores(keyword_rows)
 
@@ -131,6 +145,7 @@ def hybrid_rerank_retrieve_rows(
     top_k: int = 3,
     rerank_candidate_k: int = 10,
 ) -> list[dict]:
+    # second-stage rerank: 先做 hybrid 召回，再用 reranker 对候选做重排。
     candidate_k = min(len(rows), max(top_k, rerank_candidate_k))
     hybrid_rows = hybrid_retrieve_rows(query, rows, embedder=embedder, top_k=candidate_k)
 
@@ -201,6 +216,8 @@ def hybrid_retrieve_knowledge_chunks(
     embedder: Embedder | None | object = _USE_DEFAULT_EMBEDDER,
     top_k: int = 3,
 ) -> list[dict]:
+    # workflow 真正调用的知识库检索入口。
+    # query 通常来自 parse 后的 confirmed_needs；source_type 控制查 product 还是 playbook。
     storage_source_type = None if source_type in (None, "mixed") else source_type
     rows = storage.list_knowledge_chunks(db_path, source_type=storage_source_type)
     active_embedder = load_default_embedder() if embedder is _USE_DEFAULT_EMBEDDER else embedder

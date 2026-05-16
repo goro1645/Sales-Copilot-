@@ -2,9 +2,10 @@ from pathlib import Path
 
 
 def load_sample_documents(data_dir) -> dict:
-    """Load the bundled sample JD and resume for the web demo.
+    """读取网页 demo 自带的样例 JD 和样例简历。
 
-    Keeping file IO in a helper makes the Streamlit page easier to read and easier to test.
+    如果把文件读取直接写在 Streamlit 页面里，页面函数会变得很长。
+    拆到工具函数后，主页面代码会更像“业务流程”。
     """
 
     data_dir = Path(data_dir)
@@ -26,7 +27,11 @@ def build_runner_kwargs(
     api_key: str,
     api_model: str,
 ) -> dict:
-    """Build one normalized kwargs dict for `run_job_agent`."""
+    """把网页输入整理成 `run_job_agent` 需要的参数字典。
+
+    这样做的好处是前端页面不必知道 runner 的所有细节，
+    页面只负责采集输入，真正的参数整理在这里统一完成。
+    """
 
     kwargs = {
         "company": company,
@@ -37,6 +42,8 @@ def build_runner_kwargs(
         "use_api_generation": use_api_generation,
     }
     if use_api_generation:
+        # 只有开启 API 生成模式时，才把这些服务参数传下去。
+        # 这样 deterministic fallback 模式会更干净。
         kwargs.update(
             {
                 "api_base_url": api_base_url,
@@ -48,7 +55,7 @@ def build_runner_kwargs(
 
 
 def build_history_rows(rows: list[dict]) -> list[dict]:
-    """Format SQLite rows into a user-facing table shape."""
+    """把数据库原始记录转成适合前端表格展示的格式。"""
 
     return [
         {

@@ -1,0 +1,12 @@
+{"case_id":"product_account_memory","query":"account memory and tracked follow-up actions","source_type":"product","expected_chunk_ids":[1]}
+{"case_id":"product_private_deployment","query":"private deployment audit logging and data isolation","source_type":"product","expected_chunk_ids":[2]}
+{"case_id":"product_crm_sync","query":"crm sync writes stage changes and next-step notes","source_type":"product","expected_chunk_ids":[3]}
+{"case_id":"product_workflow_deterministic","query":"deterministic workflow storage backed outputs","source_type":"product","expected_chunk_ids":[1]}
+{"case_id":"product_security_controls","query":"sso support audit logging and security sensitive teams","source_type":"product","expected_chunk_ids":[2]}
+{"case_id":"product_shared_deployment","query":"standard shared deployment for lighter use cases","source_type":"product","expected_chunk_ids":[2]}
+{"case_id":"playbook_discovery_questions","query":"confirm top two pain points current workflow and decision owner","source_type":"playbook","expected_chunk_ids":[4]}
+{"case_id":"playbook_security_review","query":"security review concerns deployment controls sso support and audit evidence","source_type":"playbook","expected_chunk_ids":[5]}
+{"case_id":"playbook_next_step_proposal","query":"send proposal schedule demo or book procurement review","source_type":"playbook","expected_chunk_ids":[6]}
+{"case_id":"playbook_task_discipline","query":"open tasks should point to one owner and one due date","source_type":"playbook","expected_chunk_ids":[6]}
+{"case_id":"playbook_customer_memory","query":"write confirmed needs in short phrases so account memory stays readable","source_type":"playbook","expected_chunk_ids":[4]}
+{"case_id":"playbook_follow_up_owner","query":"one owner and one due date for the next step","source_type":"playbook","expected_chunk_ids":[6]}

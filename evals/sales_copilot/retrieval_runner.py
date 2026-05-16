@@ -1,3 +1,10 @@
+"""Runners for retrieval-only and dual-path retrieval benchmarks.
+
+This module evaluates retrieval separately from downstream workflow quality:
+- retrieval benchmark: measure recall / ranking with a fixed query
+- dual-path retrieval benchmark: compare ideal human query vs workflow-generated query
+"""
+
 from __future__ import annotations
 
 import json
@@ -331,6 +338,8 @@ def _keyword_only_retrieve(db_path, *, source_type: str, query: str, top_k: int 
 
 
 def _mode_metrics(expected_chunk_ids: list[int], ranked_chunk_ids: list[int]) -> RetrievalModeResult:
+    # 单个 mode 的核心 retrieval 指标：
+    # recall@1 / recall@3 / recall@5 + MRR
     return cast(
         RetrievalModeResult,
         {
@@ -407,6 +416,7 @@ def run_retrieval_benchmark(
     embedder: object = _USE_DEFAULT_EMBEDDER,
     reranker: object | None = _USE_DEFAULT_RERANKER,
 ) -> dict:
+    # 普通 retrieval benchmark：给定 query，比较 keyword / hybrid / rerank 等模式。
     cases = load_retrieval_cases(cases_path)
 
     rows_by_mode: dict[str, list[dict[str, object]]] = _rows_by_mode_template()
@@ -537,6 +547,10 @@ def run_dual_path_retrieval_benchmark(
     embedder: object = _USE_DEFAULT_EMBEDDER,
     reranker: object | None = _USE_DEFAULT_RERANKER,
 ) -> dict[str, Any]:
+    # dual-path benchmark：
+    # - gold path 用人工/理想 parse 构造 query
+    # - model path 用真实 workflow parse 构造 query
+    # 这样可以区分问题到底出在 retriever 还是 query 质量。
     cases = load_retrieval_cases(cases_path)
     csds_lookup = _load_csds_case_lookup(csds_data_dir) if csds_data_dir else None
 

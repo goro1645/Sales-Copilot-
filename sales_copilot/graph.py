@@ -1,3 +1,12 @@
+"""Main business graph for the Sales Copilot workflow.
+
+This file contains the node-level workflow logic:
+- parse meeting notes into structured facts
+- retrieve external context and account history
+- score the opportunity and choose a route
+- generate follow-up actions, CRM updates, and dashboard output
+"""
+
 from __future__ import annotations
 
 import json
@@ -43,6 +52,7 @@ from sales_copilot.tools import (
 
 
 def _append_workflow_log(state: SalesCopilotState, step_name: str) -> dict[str, Any]:
+    """Append the current step name to `workflow_log` and return a patch fragment."""
     # 这里把节点执行顺序记下来，方便测试和排查流程跑到哪一步。
     workflow_log = list(state.get("workflow_log", []))
     workflow_log.append(step_name)
@@ -50,11 +60,14 @@ def _append_workflow_log(state: SalesCopilotState, step_name: str) -> dict[str, 
 
 
 def _step_result(state: SalesCopilotState, step_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Attach a workflow-log update to a node payload before it is merged into state."""
+    # 每个节点的返回值都会顺手附加 workflow_log，方便后面做 route/debug/reporting。
     # 每个节点都沿用同一套日志更新方式，避免漏记流程痕迹。
     return {**payload, **_append_workflow_log(state, step_name)}
 
 
 def _infer_account_name(customer_profile_raw: str) -> str:
+    """Heuristically derive an account name from semi-structured profile text."""
     for line in customer_profile_raw.splitlines():
         cleaned = line.strip().lstrip("#").strip(" -*\t")
         if cleaned:
@@ -70,6 +83,7 @@ def _infer_account_name(customer_profile_raw: str) -> str:
 
 
 def _parse_json_object(content: str) -> dict[str, Any]:
+    """Parse model output as JSON and enforce that the top-level value is an object."""
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as exc:
@@ -80,6 +94,7 @@ def _parse_json_object(content: str) -> dict[str, Any]:
 
 
 def _coerce_lead_score(raw_lead_score: Any) -> int | None:
+    """Convert loose score values such as `84/100` into an integer when possible."""
     try:
         return int(raw_lead_score)
     except (TypeError, ValueError):
@@ -93,6 +108,7 @@ def _coerce_lead_score(raw_lead_score: Any) -> int | None:
 
 
 def _normalize_list(value: Any) -> list[str]:
+    """Normalize strings, scalars, or sequences into a cleaned `list[str]`."""
     if value is None:
         return []
     if isinstance(value, str):
@@ -105,6 +121,7 @@ def _normalize_list(value: Any) -> list[str]:
 
 
 def _json_list(value: Any) -> list[str]:
+    """Load JSON-encoded list-like fields and normalize them into `list[str]`."""
     if value is None:
         return []
     if isinstance(value, str):
@@ -120,6 +137,7 @@ def _json_list(value: Any) -> list[str]:
 
 
 def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    """Remove duplicates from a list while preserving the original order."""
     seen: set[str] = set()
     deduped: list[str] = []
     for item in items:
@@ -130,6 +148,7 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
 
 
 def _first_payload_value(payload: dict[str, Any], *keys: str) -> Any:
+    """Return the first non-`None` value among a set of schema key aliases."""
     # DeepSeek 偶尔会返回 score / priority / stage 这类别名。
     # 这里统一做兼容映射，避免模型轻微偏离 schema 时整条链路直接掉回 0 分兜底。
     for key in keys:
@@ -140,6 +159,7 @@ def _first_payload_value(payload: dict[str, Any], *keys: str) -> Any:
 
 
 def _unwrap_payload_object(payload: dict[str, Any]) -> dict[str, Any]:
+    """Peel wrapper keys like `result` or `data` until the business payload is exposed."""
     # 一些模型会把真正结果再包一层，例如 {"result": {...}} 或 {"data": {...}}。
     # 这里做有限展开，只取最常见的容器键，避免把任意嵌套都当成业务结果。
     current = payload
@@ -165,6 +185,7 @@ def _build_follow_up_task(
     priority: str,
     due_in_days: int = 1,
 ) -> dict[str, Any]:
+    """Construct a standardized follow-up task for programmatic gap-closing actions."""
     # 统一补信息任务的结构，避免不同分支拼出来的字段不一致。
     normalized_priority = priority if priority in {"low", "medium", "high"} else "medium"
     return {
@@ -178,6 +199,7 @@ def _build_follow_up_task(
 
 
 def _merge_task_payloads(*task_lists: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Merge multiple task lists into one normalized, deduplicated task payload."""
     # 同一轮工作流里，模型建议和补信息任务可能会同时产出。
     # 这里按标题 + 截止日期去重，避免一轮运行里把同一待办重复落库。
     merged: list[dict[str, Any]] = []
@@ -206,6 +228,7 @@ def _merge_task_payloads(*task_lists: list[dict[str, Any]] | None) -> list[dict[
 
 
 def _tasks_need_candidate_merge(task_list: list[dict[str, Any]] | None) -> bool:
+    """Detect when model-generated tasks are missing or too generic to trust alone."""
     normalized_titles = {
         str(task.get("title", "")).strip().lower()
         for task in task_list or []
@@ -225,6 +248,7 @@ def _tasks_need_candidate_merge(task_list: list[dict[str, Any]] | None) -> bool:
 
 
 def _build_missing_fact_follow_up(state: SalesCopilotState) -> dict[str, Any]:
+    """Translate missing qualification facts into conservative follow-up tasks and summary text."""
     # 这里把“信息不完整”翻译成销售可以执行的动作。
     # 这样工作台不会只会说“缺信息”，而是能直接落成待办任务。
     meeting_summary = state.get("meeting_summary") or {}
@@ -291,6 +315,7 @@ def _augment_follow_up_payload_with_missing_facts(
     state: SalesCopilotState,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    """Add clarification tasks when `risk_flags` indicate missing required facts."""
     # missing_required_facts 现在是风险信号，而不是流程终止条件。
     # 这里把风险补成明确任务，保证 CRM 和任务看板里能看到“接下来要补什么”。
     risk_flags = set(_normalize_list(state.get("risk_flags")))
@@ -309,6 +334,7 @@ def _merge_task_candidates_into_payload(
     state: SalesCopilotState,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    """Merge programmatic task candidates into the model follow-up payload."""
     candidate_tasks = build_tasks_from_candidates(list(state.get("task_candidates", [])))
     existing_tasks = payload.get("tasks", [])
     if _tasks_need_candidate_merge(existing_tasks):
@@ -325,6 +351,7 @@ def _merge_task_candidates_into_payload(
 
 
 def _looks_generic_account_name(value: str) -> bool:
+    """Filter obvious placeholder account names that should not override stronger sources."""
     text = value.strip().lower()
     if not text:
         return True
@@ -338,6 +365,7 @@ def _looks_generic_account_name(value: str) -> bool:
 
 
 def _get_or_create_account(db_path: Path | str, *, account_name: str) -> int:
+    """Reuse an existing account by name or create a minimal placeholder account."""
     normalized_name = account_name.strip().lower()
     # 先复用同名账号，避免重复运行时把同一个客户建成多条记录。
     for account in list_accounts(db_path):
@@ -361,6 +389,7 @@ def _resolve_account_name(
     *,
     database_path: Path | str | None = None,
 ) -> str:
+    """Resolve the best available account name from DB state, structured fields, or raw text."""
     # 先读已经落库的账号名，能避免同一条线索在 UI 里被“简介句子”误当成名称。
     account_id = state.get("account_id")
     if database_path is not None and account_id:
@@ -383,6 +412,7 @@ def _resolve_account_name(
 
 
 def _find_existing_meeting(db_path: Path | str, *, account_id: int, meeting_note_raw: str) -> int | None:
+    """Find a previously saved meeting for the same account by exact raw note text."""
     for row in list_meeting_records(db_path):
         if row["account_id"] == account_id and row["meeting_note_raw"] == meeting_note_raw:
             return row["id"]
@@ -396,6 +426,7 @@ def _find_existing_task(
     meeting_id: int,
     title: str,
 ) -> int | None:
+    """Find an existing open task with the same account, meeting, and title."""
     for row in list_tasks(db_path):
         if (
             row["account_id"] == account_id
@@ -414,6 +445,7 @@ def _find_existing_crm_update(
     meeting_id: int,
     after_json: str,
 ) -> int | None:
+    """Find an existing CRM update record with an identical after-state payload."""
     for row in list_crm_updates(db_path):
         if row["account_id"] == account_id and row["meeting_id"] == meeting_id and row["after_json"] == after_json:
             return row["id"]
@@ -428,6 +460,7 @@ def _build_reused_meeting_memory_payload(
     risk_flags: list[str],
     recommended_next_step: str,
 ) -> dict[str, Any]:
+    """Rebuild account memory conservatively when replaying an existing meeting."""
     # 重跑已有 meeting 时，账号级 memory 不能直接被当前 meeting 覆盖。
     # 这里先按账号下的全部 meeting 记录重建“可从 meeting_summary 推导”的聚合字段，
     # 再只对缺少独立 meeting 维度持久化的字段做有界回退。
@@ -474,6 +507,8 @@ def _build_reused_meeting_memory_payload(
 
 
 def ingest_files_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
+    """Seed a conservative account name from the profile before downstream parsing and write-back."""
+    # 入口清洗节点：先从 profile 推一个保守的 account_name，给 parse 和 CRM 写回兜底。
     del llm_client, database_path
     customer_profile_raw = state.get("customer_profile_raw", "")
     account_name = _infer_account_name(customer_profile_raw)
@@ -483,6 +518,9 @@ def ingest_files_node(state: SalesCopilotState, *, llm_client=None, database_pat
 
 
 def parse_meeting_note_node(state: SalesCopilotState, *, llm_client, database_path=None) -> dict[str, Any]:
+    """Parse raw meeting notes into `meeting_summary` unless a seeded summary is already provided."""
+    # parse 节点负责产出 `meeting_summary`。
+    # 这是后续 RAG、lead scoring、task generation 的共同事实来源。
     del database_path
     existing_summary = state.get("meeting_summary")
     # Allow pre-seeded summaries in tests and callers to flow through unchanged.
@@ -506,6 +544,9 @@ def retrieve_context_node(
     database_path=None,
     retrieval_embedder=None,
 ) -> dict[str, Any]:
+    """Build the retrieval query from `confirmed_needs` and fetch knowledge plus account history."""
+    # RAG query 默认直接来自 `confirmed_needs`，因为它比整段纪要噪声更低。
+    # 如果 confirmed_needs 为空，才退回用整段 meeting_note_raw 做 query。
     del llm_client
     query_bits = _normalize_list((state.get("meeting_summary") or {}).get("confirmed_needs"))
     query = " ".join(query_bits).strip() or state.get("meeting_note_raw", "")
@@ -536,6 +577,9 @@ def retrieve_context_node(
 
 
 def load_account_memory_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
+    """Load persisted account memory and open tasks for reuse in scoring and follow-up."""
+    # `account_memory` 是长期账户状态读取，不走向量检索。
+    # 这层更像 state store，而不是 retrieval corpus。
     del llm_client
     account_id = state.get("account_id")
     if not account_id or database_path is None:
@@ -547,6 +591,11 @@ def load_account_memory_node(state: SalesCopilotState, *, llm_client=None, datab
 
 
 def evaluate_lead_node(state: SalesCopilotState, *, llm_client, database_path=None) -> dict[str, Any]:
+    """Score the opportunity and extract priority, stage, and risks from current evidence."""
+    # lead 评估阶段综合使用：
+    # - 结构化 meeting_summary
+    # - RAG 找回的 retrieved_docs
+    # - 账户级长期状态 account_memory
     del database_path
     if (
         state.get("lead_score") is not None
@@ -593,6 +642,8 @@ def evaluate_lead_node(state: SalesCopilotState, *, llm_client, database_path=No
 
 
 def need_more_info_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
+    """Generate a conservative follow-up plan focused on filling missing qualification facts."""
+    # 补信息分支：信息不够时，不进入标准销售推进，而是先生成保守的 follow-up。
     del llm_client, database_path
     follow_up_plan = _build_missing_fact_follow_up(state)
     follow_up_plan = _merge_task_candidates_into_payload(state, follow_up_plan)
@@ -604,6 +655,8 @@ def need_more_info_node(state: SalesCopilotState, *, llm_client=None, database_p
 
 
 def low_priority_nurture_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
+    """Generate a lighter nurture-oriented follow-up plan for lower-priority opportunities."""
+    # nurture 分支：机会存在，但优先级不高，动作应该更轻、更长期。
     del llm_client, database_path
     follow_up_plan = {
         "summary": "放入低优先级培育流程，先推送轻量教育内容。",
@@ -619,6 +672,7 @@ def low_priority_nurture_node(state: SalesCopilotState, *, llm_client=None, data
 
 
 def _build_followup_payload(state: SalesCopilotState, *, llm_client) -> dict[str, Any]:
+    """Ask the model for a follow-up plan, then merge task candidates and missing-fact tasks."""
     messages = build_followup_plan_messages(
         meeting_summary=state.get("meeting_summary", {}),
         opportunity_stage=state.get("opportunity_stage", ""),
@@ -633,6 +687,8 @@ def _build_followup_payload(state: SalesCopilotState, *, llm_client) -> dict[str
 
 
 def build_task_candidates_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
+    """Convert meeting facts and risk signals into programmatic task candidates."""
+    # `task_candidates` 把会议里已经出现的具体动作固定下来，减少最终任务的事实丢失。
     del llm_client, database_path
     candidates = build_task_candidates(
         meeting_summary=state.get("meeting_summary", {}),
@@ -644,18 +700,23 @@ def build_task_candidates_node(state: SalesCopilotState, *, llm_client=None, dat
 
 
 def standard_follow_up_node(state: SalesCopilotState, *, llm_client, database_path=None) -> dict[str, Any]:
+    """Generate the normal follow-up payload for medium-score opportunities."""
     del database_path
     payload = _build_followup_payload(state, llm_client=llm_client)
     return _step_result(state, "standard_follow_up", {"follow_up_plan": payload, "task_payload": list(payload.get("tasks", []))})
 
 
 def high_priority_follow_up_node(state: SalesCopilotState, *, llm_client, database_path=None) -> dict[str, Any]:
+    """Generate the follow-up payload for high-priority opportunities."""
     del database_path
     payload = _build_followup_payload(state, llm_client=llm_client)
     return _step_result(state, "high_priority_follow_up", {"follow_up_plan": payload, "task_payload": list(payload.get("tasks", []))})
 
 
 def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_path=None, mcp_client=None) -> dict[str, Any]:
+    """Persist workflow outputs into meeting records, tasks, CRM state, and account memory."""
+    # 执行层节点：把模型判断和程序整理后的 payload 真正落进 CRM / tasks。
+    # 这一步不是让模型直接写库，而是 workflow 在执行阶段调用工具层。
     del llm_client
     if database_path is None:
         return _step_result(state, "write_back_crm", {"crm_update_ids": [], "crm_writeback_performed": False})
@@ -708,6 +769,8 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
                 },
             )
 
+    # `task_payload` 是前面 follow-up 节点已经整理好的最终任务列表。
+    # 这里不再让模型生成任务，只负责把这些任务幂等地落进任务表或 MCP task tool。
     task_payload = state.get("task_payload", [])
     task_ids: list[int] = []
     for task in task_payload:
@@ -732,6 +795,10 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
             task_ids.append(int(result["task_id"]))
             continue
 
+        # direct 模式下按 account + meeting + title 做轻量幂等：
+        # - 已存在：更新描述、优先级、截止时间、状态
+        # - 不存在：新建
+        # 这样重复 replay 同一条 meeting 时，不会无限插入重复任务。
         existing_task_id = _find_existing_task(
             database_path,
             account_id=account_id,
@@ -766,6 +833,13 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
             )
         )
 
+    # CRM 主表写回策略刻意保持克制：
+    # - status: 统一标成 active，表示账号仍在跟进
+    # - opportunity_stage: 使用模型判断出的销售阶段
+    # - last_contact_at: 记录最近一次触达日期
+    #
+    # 也就是说，主表不直接承载 confirmed_needs / risk_flags / next step 的细节；
+    # 那些更适合写进 account_memory 或 tasks，避免一次 meeting 把主表改得过重。
     crm_after = {
         "meeting_id": meeting_id,
         "status": "active",
@@ -782,6 +856,8 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
         crm_update_id = None
     else:
         crm_after_json = json.dumps(crm_after, ensure_ascii=False)
+        # 如果这次 CRM after_json 和历史完全一致，就复用已有 crm_update 记录；
+        # 这样可以保留“这类写回已经发生过”的痕迹，同时避免重复插同样的 update。
         existing_crm_update_id = _find_existing_crm_update(
             database_path,
             account_id=account_id,
@@ -804,6 +880,8 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
                 crm_after,
             )
 
+    # `recommended_next_step` 取 follow-up summary，而不是任务标题本身。
+    # 这样 account_memory 存的是“下一步建议摘要”，更适合后续 lead scoring / UI 复用。
     recommended_next_step = str((state.get("follow_up_plan") or {}).get("summary", "")).strip()
     memory_payload = {
         "confirmed_needs_json": json.dumps(_normalize_list(meeting_summary.get("confirmed_needs")), ensure_ascii=False),
@@ -814,6 +892,11 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
         "recommended_next_step": recommended_next_step,
     }
     if meeting_reused:
+        # replay 已存在的旧 meeting 时，memory 写回更保守：
+        # - 不直接用这次 replay 的 payload 覆盖整行 memory
+        # - 只把可合并的风险和更合适的 next step 合进去
+        #
+        # 这样可以避免旧 meeting 回放把更新 meeting 已经写进去的推荐动作抢掉。
         upsert_account_memory(
             database_path,
             account_id,
@@ -828,6 +911,10 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
     else:
         append_account_memory(database_path, account_id, memory_payload)
 
+    # 这一步最终同时产出三类“写回已完成”的结果：
+    # - crm_update_ids: CRM 主状态更新记录
+    # - task_ids: 任务系统里的具体待办
+    # - account_memory: 已在上面完成追加/合并，不单独回传整行，只回传显式标记
     return _step_result(
         state,
         "write_back_crm",
@@ -844,6 +931,8 @@ def write_back_crm_node(state: SalesCopilotState, *, llm_client=None, database_p
 
 
 def generate_dashboard_output_node(state: SalesCopilotState, *, llm_client=None, database_path=None) -> dict[str, Any]:
+    """Assemble a UI-friendly dashboard summary from parse, scoring, follow-up, and CRM results."""
+    # 最后把 parse / lead scoring / follow-up / CRM 结果汇总成 UI 更容易消费的 dashboard 结构。
     del llm_client
     account_name = _resolve_account_name(state, database_path=database_path)
     follow_up_plan = state.get("follow_up_plan", {})
@@ -891,6 +980,10 @@ def generate_dashboard_output_node(state: SalesCopilotState, *, llm_client=None,
 
 
 def route_after_lead_evaluation(state: SalesCopilotState) -> str:
+    """Map lead score and summary availability to the next workflow execution route."""
+    # route 是系统执行分流，和 opportunity_stage 相关但不相同：
+    # - stage 更像销售漏斗判断
+    # - route 更像“接下来走哪条处理路径”
     meeting_summary = state.get("meeting_summary") or {}
     lead_score = _coerce_lead_score(state.get("lead_score", 0))
 
@@ -912,6 +1005,7 @@ def _bind_node(
     database_path=None,
     retrieval_embedder=None,
 ) -> Callable[[SalesCopilotState], dict[str, Any]]:
+    """Partially bind shared runtime dependencies to a graph node function."""
     kwargs = {"llm_client": llm_client, "database_path": database_path}
     if "retrieval_embedder" in inspect.signature(node).parameters:
         kwargs["retrieval_embedder"] = retrieval_embedder
@@ -919,6 +1013,9 @@ def _bind_node(
 
 
 def build_sales_copilot_graph(*, llm_client, database_path, mcp_client=None, retrieval_embedder=None) -> Any:
+    """Build and compile the end-to-end Sales Copilot LangGraph workflow."""
+    # 主线顺序：
+    # ingest -> parse -> retrieve -> memory -> score -> route -> follow-up -> CRM -> dashboard
     builder = StateGraph(SalesCopilotState)
 
     builder.add_node(

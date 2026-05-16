@@ -1,8 +1,21 @@
+"""一些不依赖大模型也能稳定运行的“基础工具函数”。
+
+这个文件里的函数很适合新手先读，因为它们大多是确定性的：
+- 输入什么
+- 处理什么
+- 输出什么
+
+都比较清楚，不像 LLM 调用那样带有随机性。
+"""
+
 import re
 
 from agent.schemas import ApplicationRecord
 
 
+# 这些词在 JD 里很常见，但通常不能当成“技能关键词”。
+# 例如 company / experience / strong / required 这类词出现频率很高，
+# 如果不去掉，会把真正的技能词淹没掉。
 JOB_POSTING_STOPWORDS = {
     "a",
     "ability",
@@ -55,10 +68,14 @@ JOB_POSTING_STOPWORDS = {
 
 
 def extract_keywords(text: str) -> list[str]:
-    """Return lowercase keywords in first-seen order.
+    """从文本里提取英文关键词，并保持第一次出现时的顺序。
 
-    We intentionally keep this helper deterministic so it is easy to test and reason about
-    before any LLM-based extraction is introduced.
+    这里没有上复杂的 NLP，而是故意保持简单：
+    - 全部转小写
+    - 用正则抓英文单词
+    - 去重但保留原始顺序
+
+    这样做的好处是非常稳定，也便于写测试。
     """
 
     tokens = re.findall(r"[A-Za-z]+", text.lower())
@@ -75,15 +92,24 @@ def score_resume_fit(
     required_skills: list[str],
     preferred_skills: list[str] | None = None,
 ) -> dict:
-    """Score resume fit using simple keyword overlap.
+    """用“关键词重合度”给简历和 JD 打分。
 
-    This deterministic scorer gives us a stable baseline. Later, we can combine it with
-    model-based reasoning without losing an easy-to-understand fallback path.
+    这是当前项目里最容易理解的一种评分方式：
+    1. 从简历里提关键词
+    2. 看 required_skills 里哪些命中了
+    3. 命中率 * 100，得到分数
+
+    比如：
+    - required skills 有 5 个
+    - 命中了 4 个
+    - 那 score = 80
     """
 
     preferred_skills = preferred_skills or []
     resume_keywords = set(extract_keywords(resume_text))
 
+    # matched / missing / preferred_hits 这三类结果后面都会被前端展示，
+    # 也会被 prompt 用来引导模型改写简历。
     matched_skills = [skill for skill in required_skills if skill.lower() in resume_keywords]
     missing_skills = [skill for skill in required_skills if skill.lower() not in resume_keywords]
     preferred_hits = [skill for skill in preferred_skills if skill.lower() in resume_keywords]
@@ -101,14 +127,17 @@ def score_resume_fit(
 
 
 def parse_job_description(job_posting: str) -> dict:
-    """Extract a lightweight summary and skill lists from a JD.
+    """从 JD 里提取结构化字段。
 
-    Strategy:
-    1. If the JD contains explicit `Requirements` / `Preferred` sections, trust those first.
-    2. Otherwise fall back to a filtered full-text keyword scan.
+    当前策略非常适合入门理解：
+    1. 如果 JD 里有明确的 `Requirements` / `Preferred` 小节，就优先信这些结构
+    2. 如果没有明显结构，就退回到全文关键词扫描
+
+    这相当于一个“先用规则，规则不够再降级”的思路。
     """
 
     def filtered_keywords(text: str) -> list[str]:
+        # 先做通用关键词提取，再去掉无意义的停用词。
         return [keyword for keyword in extract_keywords(text) if keyword not in JOB_POSTING_STOPWORDS]
 
     current_section = None
@@ -120,6 +149,8 @@ def parse_job_description(job_posting: str) -> dict:
         if not line:
             continue
 
+        # 下面这段逻辑的目标是识别“当前正在读 JD 的哪个区块”。
+        # 比如遇到 Requirements，后续的列表项都归到 required_skills。
         lowered = line.lower().lstrip("#").strip()
         if "requirement" in lowered or lowered == "required":
             current_section = "required"
@@ -140,6 +171,8 @@ def parse_job_description(job_posting: str) -> dict:
                 target.append(keyword)
 
     if not required_skills and not preferred_skills:
+        # 如果整份 JD 没有明显的结构化标题，
+        # 就把全文做一次简化关键词抽取，至少保证后续评分还能跑。
         required_skills = filtered_keywords(job_posting)
 
     return {
@@ -156,7 +189,11 @@ def rewrite_resume_for_job(
     required_skills: list[str],
     matched_skills: list[str],
 ) -> str:
-    """Produce a readable fallback rewrite before we plug in the MiniMind generator."""
+    """生成一个不依赖模型的简历改写兜底版本。
+
+    它不是特别“聪明”，但足够稳定。
+    这很适合 demo 和教学场景，因为你永远能看见一份输出。
+    """
 
     highlighted = ", ".join(matched_skills or required_skills[:3])
     return (
@@ -172,7 +209,7 @@ def generate_cover_letter(
     role: str,
     matched_skills: list[str],
 ) -> str:
-    """Create a deterministic cover letter skeleton for high-match cases."""
+    """生成一个固定模板的求职信兜底版本。"""
 
     skills_summary = ", ".join(matched_skills) or "relevant LLM application skills"
     return (
@@ -192,7 +229,11 @@ def build_application_record(
     resume_version: str,
     cover_letter: str,
 ) -> dict:
-    """Build a validated record for later JSON or SQLite persistence."""
+    """构建一条经过 schema 校验的申请记录。
+
+    这里先过一次 `ApplicationRecord`，
+    是为了在真正写数据库之前，先保证字段结构是对的。
+    """
 
     record = ApplicationRecord(
         company=company,

@@ -1,3 +1,9 @@
+"""Build retrieval queries from structured parse payloads.
+
+This file is intentionally simple: it turns workflow parse output into a query
+string so we can test retrieval under "real system query" conditions.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -23,6 +29,8 @@ def _normalize_items(value: Any) -> list[str]:
 
 
 def build_retrieval_query(parse_payload: dict[str, Any]) -> str:
+    # 这里不做复杂 query rewriting，而是直接把结构化字段拼成 query。
+    # 这样 dual-path benchmark 才能反映“真实 workflow 自动生成 query”时的检索效果。
     parts: list[str] = []
     seen: set[str] = set()
     for field in _QUERY_FIELDS:

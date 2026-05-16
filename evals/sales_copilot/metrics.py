@@ -1,3 +1,11 @@
+"""Metrics for Sales Copilot parse and workflow evaluation.
+
+There are three evaluation layers worth keeping separate when reading this file:
+1. Parse extraction quality: did we extract the right structured facts?
+2. Semantic matching quality: did near-equivalent wording still count?
+3. Workflow outcome quality: did route / CRM / task outputs land in the right place?
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -286,6 +294,8 @@ def _task_title_matches(required_title: str, actual_title: str) -> bool:
 
 
 def _set_precision_recall_f1(expected: list[str], actual: list[str]) -> tuple[float, float, float]:
+    # literal list-field F1:
+    # TP/FP/FN 不是按分类标签算，而是按“字段里的列表项匹配”来算。
     if not expected and not actual:
         return 1.0, 1.0, 1.0
     if not expected or not actual:
@@ -313,6 +323,8 @@ def _set_precision_recall_f1(expected: list[str], actual: list[str]) -> tuple[fl
 
 
 def _semantic_set_precision_recall_f1(field: str, expected: list[str], actual: list[str]) -> tuple[float, float, float]:
+    # semantic list-field F1:
+    # 比 literal 更宽松，允许一定程度的改写/近义表达，但仍保留字段 guard 和阈值。
     if not expected and not actual:
         return 1.0, 1.0, 1.0
     if not expected or not actual:
@@ -377,6 +389,10 @@ def _is_valid_actual_parse(actual_parse: dict[str, Any]) -> bool:
 
 
 def evaluate_parse_case(case: dict[str, Any], actual_parse: Any) -> dict[str, Any]:
+    # case 级 parse 评测：
+    # - scalar 字段看 exact match
+    # - list 字段看 literal F1 和 semantic F1
+    # - risk flags 单独看 recall
     expected_parse = case.get("expected_parse", {})
     if not isinstance(expected_parse, dict):
         expected_parse = {}
@@ -447,6 +463,8 @@ def evaluate_parse_case(case: dict[str, Any], actual_parse: Any) -> dict[str, An
 
 
 def summarize_parse_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    # 汇总后的 average_list_field_f1 / average_semantic_list_field_f1，
+    # 都是在“适用字段”上做跨 case 的平均。
     total = len(rows)
     if total == 0:
         return {
@@ -552,6 +570,7 @@ def summarize_parse_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def evaluate_workflow_case(case: dict[str, Any], actual_result: Any) -> dict[str, Any]:
+    # workflow 评测回答的是“最终系统行为对不对”，不是 parse 内容像不像 gold。
     expected_workflow = case.get("expected_workflow", {})
     if not isinstance(expected_workflow, dict):
         expected_workflow = {}
@@ -625,6 +644,7 @@ def evaluate_workflow_case(case: dict[str, Any], actual_result: Any) -> dict[str
 
 
 def summarize_workflow_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    # workflow 汇总指标主要用于看最终链路行为，而不是字段级抽取质量。
     total = len(rows)
     if total == 0:
         return {

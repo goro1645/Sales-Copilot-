@@ -150,3 +150,70 @@ def test_load_full_csds_cases_preserves_timeline_signals_from_official_summaries
 
     assert len(cases) == 1
     assert cases[0]["expected_parse"]["timeline_signals"] == ["客服说明会在3个工作日内到账。"]
+
+
+
+def test_load_full_csds_cases_builds_role_scoped_meeting_note_text_for_llm_parse(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "csds"
+    dataset_dir.mkdir()
+    (dataset_dir / "train.json").write_text(
+        json.dumps(
+            [
+                {
+                    "DialogueID": 11,
+                    "QRole": "\u7528\u6237",
+                    "UserSumm": ["\u7528\u6237\u8be2\u95ee\u62d2\u6536\u8ba2\u5355\u4ec0\u4e48\u65f6\u5019\u9000\u6b3e\u3002"],
+                    "AgentSumm": ["\u5ba2\u670d\u56de\u7b54\u5f85\u914d\u9001\u628a\u5546\u54c1\u9000\u56de\u540e\u5c31\u9000\u6b3e\u3002"],
+                    "FinalSumm": [
+                        "\u7528\u6237\u8be2\u95ee\u62d2\u6536\u8ba2\u5355\u4ec0\u4e48\u65f6\u5019\u9000\u6b3e\u3002",
+                        "\u5ba2\u670d\u56de\u7b54\u5f85\u914d\u9001\u628a\u5546\u54c1\u9000\u56de\u540e\u5c31\u9000\u6b3e\u3002",
+                    ],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    cases = load_full_csds_cases(dataset_dir, splits=["train"])
+
+    assert len(cases) == 1
+    assert "\u7528\u6237\u6458\u8981" in cases[0]["meeting_note_text"]
+    assert "\u5ba2\u670d\u5904\u7406" in cases[0]["meeting_note_text"]
+    assert "\u4f1a\u8bdd\u603b\u7ed3" in cases[0]["meeting_note_text"]
+
+
+def test_load_full_csds_cases_collects_customer_service_timeline_signals_from_user_and_agent_summaries(tmp_path: Path) -> None:
+    dataset_dir = tmp_path / "csds"
+    dataset_dir.mkdir()
+    (dataset_dir / "train.json").write_text(
+        json.dumps(
+            [
+                {
+                    "DialogueID": 12,
+                    "QRole": "\u7528\u6237",
+                    "UserSumm": ["\u7528\u6237\u8868\u793a\u9a6c\u4e0a10\u70b9\u949f\u4e86\u79d2\u6740\u5c31\u7ed3\u675f\u3002"],
+                    "AgentSumm": [
+                        "\u5ba2\u670d\u8868\u793a\u4eca\u5929\u4f1a\u7535\u8bdd\u56de\u590d\u7528\u6237\u3002",
+                        "\u5ba2\u670d\u56de\u7b54\u786e\u8ba4\u6536\u8d27\u540e\u624d\u80fd\u5f00\u5177\u53d1\u7968\u3002",
+                    ],
+                    "FinalSumm": [
+                        "\u7528\u6237\u8868\u793a\u9a6c\u4e0a10\u70b9\u949f\u4e86\u79d2\u6740\u5c31\u7ed3\u675f\u3002",
+                        "\u5ba2\u670d\u8868\u793a\u4eca\u5929\u4f1a\u7535\u8bdd\u56de\u590d\u7528\u6237\u3002",
+                        "\u5ba2\u670d\u56de\u7b54\u786e\u8ba4\u6536\u8d27\u540e\u624d\u80fd\u5f00\u5177\u53d1\u7968\u3002",
+                    ],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    cases = load_full_csds_cases(dataset_dir, splits=["train"])
+
+    assert len(cases) == 1
+    assert cases[0]["expected_parse"]["timeline_signals"] == [
+        "\u7528\u6237\u8868\u793a\u9a6c\u4e0a10\u70b9\u949f\u4e86\u79d2\u6740\u5c31\u7ed3\u675f\u3002",
+        "\u5ba2\u670d\u8868\u793a\u4eca\u5929\u4f1a\u7535\u8bdd\u56de\u590d\u7528\u6237\u3002",
+        "\u5ba2\u670d\u56de\u7b54\u786e\u8ba4\u6536\u8d27\u540e\u624d\u80fd\u5f00\u5177\u53d1\u7968\u3002",
+    ]

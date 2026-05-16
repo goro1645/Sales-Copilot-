@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -75,6 +76,13 @@ def init_storage(db_path) -> None:
                 chunk_text TEXT NOT NULL,
                 tags_json TEXT NOT NULL,
                 retrieval_metadata_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS knowledge_chunk_embeddings (
+                chunk_id INTEGER NOT NULL REFERENCES knowledge_chunks(id) ON DELETE CASCADE,
+                model_name TEXT NOT NULL,
+                embedding_json TEXT NOT NULL,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (chunk_id, model_name)
             );
             """
         )
@@ -354,3 +362,43 @@ def list_knowledge_chunks(db_path, source_type: str | None = None) -> list[dict]
         conn.row_factory = sqlite3.Row
         rows = conn.execute(query, params).fetchall()
     return [dict(row) for row in rows]
+
+
+def upsert_knowledge_chunk_embedding(
+    db_path,
+    *,
+    chunk_id: int,
+    model_name: str,
+    embedding: list[float],
+) -> None:
+    init_storage(db_path)
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO knowledge_chunk_embeddings (chunk_id, model_name, embedding_json, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(chunk_id, model_name)
+            DO UPDATE SET embedding_json = excluded.embedding_json, updated_at = CURRENT_TIMESTAMP
+            """,
+            (chunk_id, model_name, json.dumps(embedding)),
+        )
+        conn.commit()
+
+
+def get_knowledge_chunk_embedding(db_path, *, chunk_id: int, model_name: str) -> dict | None:
+    init_storage(db_path)
+    with _connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT chunk_id, model_name, embedding_json
+            FROM knowledge_chunk_embeddings
+            WHERE chunk_id = ? AND model_name = ?
+            """,
+            (chunk_id, model_name),
+        ).fetchone()
+    if row is None:
+        return None
+    payload = dict(row)
+    payload["embedding"] = json.loads(payload.pop("embedding_json"))
+    return payload

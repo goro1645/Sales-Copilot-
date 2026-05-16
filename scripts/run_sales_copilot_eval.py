@@ -31,6 +31,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--mode", choices=["offline"], default="offline")
     parser.add_argument("--execution-mode", choices=["direct", "mcp"], default="direct")
+    parser.add_argument("--use-signal-reclassification", action="store_true")
+    parser.add_argument("--use-candidate-generation-refinement", action="store_true")
     parser.add_argument("--api-base-url", default=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
     parser.add_argument("--api-model", default=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"))
     return parser
@@ -54,6 +56,8 @@ def main() -> int:
             cases_path=cases_path,
             output_dir=args.output_dir,
             llm_client=llm_client,
+            use_signal_reclassification=args.use_signal_reclassification,
+            use_candidate_generation_refinement=args.use_candidate_generation_refinement,
         )
     elif args.dataset_kind == "full-csds":
         if not args.csds_data_dir:
@@ -64,6 +68,8 @@ def main() -> int:
             llm_client=llm_client,
             splits=csds_splits,
             limit=args.limit,
+            use_signal_reclassification=args.use_signal_reclassification,
+            use_candidate_generation_refinement=args.use_candidate_generation_refinement,
         )
     else:
         bundle = run_offline_evaluation(

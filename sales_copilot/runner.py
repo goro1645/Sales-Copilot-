@@ -1,3 +1,13 @@
+"""Workflow entrypoints for running Sales Copilot end-to-end.
+
+Read this file when you want the shortest path from input to output:
+- `run_sales_copilot(...)` returns the final workflow result.
+- `run_sales_copilot_stream(...)` emits structured events for CLI, SSE, and UI.
+
+The business rules still live in `graph.py`. This file mainly wraps those nodes
+into either a final result or a stream of node/token events.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -52,6 +62,7 @@ def run_sales_copilot(
     execution_mode: str = "direct",
     mcp_client=None,
 ) -> dict[str, Any]:
+    # 非流式入口：适合离线评测、脚本调用和“只关心最终结果”的场景。
     # 这里仅整理图所需状态；评测已拿到 parse 结果时可直接复用，避免重复请求模型。
     if execution_mode not in {"direct", "mcp"}:
         raise ValueError("execution_mode must be one of: direct, mcp")
@@ -88,6 +99,8 @@ def _build_initial_state(
     meeting_summary: dict[str, Any] | None,
     meeting_summary_provided: bool,
 ) -> dict[str, Any]:
+    # 这里把 workflow 的最小输入骨架固定住。
+    # 后续节点会不断把真实业务结果填回这个共享 state。
     state: dict[str, Any] = {
         "customer_profile_raw": customer_profile_text,
         "meeting_note_raw": meeting_note_text,
@@ -108,6 +121,7 @@ def _apply_patch(state: dict[str, Any], patch: dict[str, Any]) -> None:
 
 
 def _run_sync_node(state: dict[str, Any], node_name: str, fn, **kwargs):
+    # 对非 LLM 节点统一封装 started -> patch -> finished 事件。
     yield make_node_started_event(node_name, streaming=False)
     patch = fn(state, **kwargs)
     _apply_patch(state, patch)
@@ -117,6 +131,10 @@ def _run_sync_node(state: dict[str, Any], node_name: str, fn, **kwargs):
 
 def _run_parse_node(state: dict[str, Any], llm_client):
     node_name = "parse_meeting_note"
+    # `meeting_summary` 是整个 workflow 的事实底座：
+    # - confirmed_needs: 客户明确提出的需求/问题
+    # - next_steps: 接下来要执行的动作
+    # - timeline_signals: 时间承诺、截止时间、等待窗口
     existing_summary = state.get("meeting_summary")
     if state.get("meeting_summary_provided") or (
         isinstance(existing_summary, dict) and existing_summary and not state.get("meeting_note_raw")
@@ -148,6 +166,8 @@ def _run_parse_node(state: dict[str, Any], llm_client):
 
 def _run_evaluate_lead_node(state: dict[str, Any], llm_client):
     node_name = "evaluate_lead"
+    # lead 评估阶段主要由模型直接给出 score / priority / stage / risks。
+    # 规则层只做轻量兜底，不手工“算分”。
     if (
         state.get("lead_score") is not None
         and not state.get("customer_profile_raw")
@@ -207,6 +227,7 @@ def _run_evaluate_lead_node(state: dict[str, Any], llm_client):
 
 
 def _run_followup_node(state: dict[str, Any], llm_client, node_name: str):
+    # follow-up / task 生成时会显式喂入 `task_candidates`，避免任务退化成泛模板。
     messages = build_followup_plan_messages(
         meeting_summary=state.get("meeting_summary", {}),
         opportunity_stage=state.get("opportunity_stage", ""),
@@ -223,6 +244,7 @@ def _run_followup_node(state: dict[str, Any], llm_client, node_name: str):
     payload = _parse_json_object(content)
     tasks = payload.get("tasks") or payload.get("task_payload") or []
     payload["tasks"] = tasks if isinstance(tasks, list) else []
+    # `task_candidates` 是程序构造的中间层，不是另一轮自由生成。
     candidate_tasks = build_tasks_from_candidates(list(state.get("task_candidates", [])))
     existing_tasks = payload.get("tasks", [])
     merged_tasks = []
@@ -263,6 +285,7 @@ def run_sales_copilot_stream(
     execution_mode: str = "direct",
     mcp_client=None,
 ):
+    # 流式入口与非流式入口共用同一套业务节点，只是把中间过程包装成结构化事件流。
     if execution_mode not in {"direct", "mcp"}:
         raise ValueError("execution_mode must be one of: direct, mcp")
     if execution_mode == "mcp" and mcp_client is None:
@@ -295,6 +318,7 @@ def run_sales_copilot_stream(
         yield from _run_evaluate_lead_node(state, llm_client)
         yield from _run_sync_node(state, "build_task_candidates", build_task_candidates_node, llm_client=llm_client, database_path=database_path)
 
+        # route 是执行分流，不等于 opportunity_stage。
         route = route_after_lead_evaluation(state)
         if route == "need_more_info":
             yield from _run_sync_node(state, "need_more_info", need_more_info_node, llm_client=llm_client, database_path=database_path)

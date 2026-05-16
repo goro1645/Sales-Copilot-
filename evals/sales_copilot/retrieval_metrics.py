@@ -1,9 +1,17 @@
+"""Metrics for retrieval-only benchmarks.
+
+These metrics answer a narrower question than workflow metrics:
+"Did the retriever bring the right knowledge chunks into the top-k results?"
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
 
 
 def recall_at_k(expected_ids: list[int], ranked_ids: list[int], k: int) -> float:
+    # retrieval recall@k:
+    # 只要前 k 个结果里命中任一正确 chunk，就记为 1.0，否则为 0.0。
     if k <= 0 or not expected_ids or not ranked_ids:
         return 0.0
 
@@ -15,6 +23,7 @@ def recall_at_k(expected_ids: list[int], ranked_ids: list[int], k: int) -> float
 
 
 def reciprocal_rank(expected_ids: list[int], ranked_ids: list[int]) -> float:
+    # MRR / reciprocal rank 更关注“第一个正确结果排得靠不靠前”。
     if not expected_ids or not ranked_ids:
         return 0.0
 
@@ -55,6 +64,7 @@ def _summarize_rows(rows: list[dict[str, object]]) -> dict[str, float]:
 
 
 def summarize_retrieval_metrics(rows_by_mode: dict[str, list[dict]]) -> dict[str, dict]:
+    # 不同 retrieval mode（keyword / hybrid / hybrid_rerank）分别独立汇总。
     return {mode: _summarize_rows(rows) for mode, rows in rows_by_mode.items()}
 
 
@@ -74,6 +84,9 @@ def summarize_retrieval_metrics_by_bucket(rows_by_mode: dict[str, list[dict]]) -
 
 
 def summarize_dual_path_gap(summary_by_path: dict[str, dict[str, dict[str, float]]]) -> dict[str, dict[str, float]]:
+    # dual-path gap 用来比较：
+    # - gold path: 人工理想 query
+    # - model path: 真实 workflow 自动生成的 query
     gold = summary_by_path.get("gold", {})
     model = summary_by_path.get("model", {})
     gap: dict[str, dict[str, float]] = {}

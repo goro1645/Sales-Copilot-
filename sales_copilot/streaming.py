@@ -55,13 +55,17 @@ def stream_llm_completion(
 ):
     stream_method = getattr(llm_client, "stream", None)
     if callable(stream_method):
+        iterator = None
         try:
-            iterator = stream_method(messages, tools=tools)
+            iterator = stream_method(messages, tools=tools, response_format=response_format)
         except TypeError:
-            iterator = stream_method(messages)
+            try:
+                iterator = stream_method(messages, tools=tools)
+            except TypeError:
+                iterator = stream_method(messages)
         except NotImplementedError:
             iterator = None
-        else:
+        if iterator is not None:
             content_parts: list[str] = []
             saw_message_finished = False
             for raw_event in iterator:

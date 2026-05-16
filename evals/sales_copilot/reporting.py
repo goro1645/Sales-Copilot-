@@ -1,3 +1,12 @@
+"""Report writers for parse/workflow evaluation bundles.
+
+This module does not define metrics. It turns already-computed case metrics into
+artifacts that are easier to inspect:
+- `report.json` for machine-readable bundles
+- `report.md` for quick human review
+- `case_results.jsonl` for row-level debugging
+"""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -59,6 +68,7 @@ def _collect_failing_cases(case_results: list[dict[str, Any]]) -> list[dict[str,
 
 
 def _build_report_markdown(bundle: dict[str, Any]) -> str:
+    # 这里把 parse metrics 和 workflow metrics 收成一份面向人读的 markdown 报告。
     summary = bundle.get("summary", {})
     parse_summary = summary.get("parse", {})
     workflow_summary = summary.get("workflow", {})
@@ -147,6 +157,7 @@ def _build_report_markdown(bundle: dict[str, Any]) -> str:
 
 
 def write_report_bundle(bundle, output_root) -> str:
+    # 每次评测落到独立时间戳目录，方便对比不同方案和不同实验轮次。
     root = Path(output_root)
     root.mkdir(parents=True, exist_ok=True)
     report_dir = root / dt.datetime.now().strftime("%Y%m%d%H%M%S")

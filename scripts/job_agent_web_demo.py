@@ -1,3 +1,14 @@
+"""Streamlit 网页演示入口。
+
+这个文件是整个项目的“前台页面”：
+- 左侧收集用户输入
+- 侧边栏控制运行模式
+- 下方展示 Agent 运行结果
+
+如果你是第一次看这个项目，建议从这里开始，
+先理解页面怎么收集数据，再顺着 `run_job_agent(...)` 往里读。
+"""
+
 import os
 import sys
 from pathlib import Path
@@ -22,7 +33,11 @@ DEFAULT_DB_PATH = DATA_DIR / "applications.db"
 
 
 def apply_page_style():
-    """Inject a distinct visual identity for the Streamlit job-agent demo."""
+    """给 Streamlit 页面注入自定义样式。
+
+    这一大段 CSS 主要负责页面“长什么样”，不参与业务逻辑。
+    读代码时如果你更想先理解 Agent 流程，可以先快速略过这里。
+    """
 
     st.markdown(
         """
@@ -185,7 +200,12 @@ def apply_page_style():
 
 
 def ensure_session_defaults():
-    """Seed the page with sample texts the first time the demo opens."""
+    """给页面第一次打开时准备默认值。
+
+    `st.session_state` 可以理解成页面运行过程中的“小内存”。
+    我们把样例 JD、样例简历、默认公司和岗位名放进去，
+    这样页面第一次打开就能直接体验，而不是完全空白。
+    """
 
     samples = load_sample_documents(DATA_DIR)
     st.session_state.setdefault("job_posting_text", samples["job_posting"])
@@ -196,6 +216,8 @@ def ensure_session_defaults():
 
 
 def render_hero():
+    """渲染页面顶部标题区。"""
+
     st.markdown(
         """
         <div class="hero-shell">
@@ -212,6 +234,8 @@ def render_hero():
 
 
 def render_metric(label: str, value: str, note: str):
+    """渲染一个指标卡片。"""
+
     st.markdown(
         f"""
         <div class="metric-shell">
@@ -225,6 +249,14 @@ def render_metric(label: str, value: str, note: str):
 
 
 def render_settings_panel():
+    """渲染侧边栏设置。
+
+    这里控制的是“怎么运行 Agent”，例如：
+    - 是否启用真实 MiniMind API
+    - API 地址是什么
+    - 数据库保存到哪里
+    """
+
     with st.sidebar:
         st.markdown("### Runtime")
         use_api_generation = st.toggle(
@@ -238,6 +270,7 @@ def render_settings_panel():
         database_path = st.text_input("SQLite Path", value=str(DEFAULT_DB_PATH))
         st.caption("Keep generation off if your local MiniMind API is not running yet.")
 
+    # 统一打包成 dict 返回，能让后面的页面函数依赖更清楚。
     return {
         "use_api_generation": use_api_generation,
         "api_base_url": api_base_url,
@@ -248,6 +281,9 @@ def render_settings_panel():
 
 
 def render_input_panel(settings: dict):
+    """渲染主输入区，并在点击按钮时触发 Job Agent。"""
+
+    # 左边是表单输入，右边是运行配置和历史记录。
     left, right = st.columns([1.6, 1], gap="large")
 
     with left:
@@ -263,6 +299,7 @@ def render_input_panel(settings: dict):
         action_left, action_right, action_spacer = st.columns([1, 1, 2])
         with action_left:
             if st.button("Load sample JD", use_container_width=True):
+                # 把样例 JD 写回 session_state，文本框会自动刷新成新内容。
                 st.session_state["job_posting_text"] = load_sample_documents(DATA_DIR)["job_posting"]
         with action_right:
             if st.button("Load sample resume", use_container_width=True):
@@ -285,6 +322,8 @@ def render_input_panel(settings: dict):
             unsafe_allow_html=True,
         )
 
+        # 每次页面渲染时，都从 SQLite 读一遍历史记录，
+        # 这样你一跑完新结果，右边列表就会同步出现。
         rows = build_history_rows(list_application_records(settings["database_path"]))
         st.markdown("---")
         st.markdown('<div class="section-title">Recent Application Records</div>', unsafe_allow_html=True)
@@ -295,6 +334,7 @@ def render_input_panel(settings: dict):
         st.markdown("</div>", unsafe_allow_html=True)
 
     if submitted:
+        # 先把页面采集到的输入整理成 runner 需要的参数结构。
         kwargs = build_runner_kwargs(
             company=company,
             role=role,
@@ -308,13 +348,18 @@ def render_input_panel(settings: dict):
         )
 
         with st.spinner("Running the MiniMind job agent..."):
+            # 真正触发 Agent 执行的核心调用就在这一行。
             st.session_state["last_result"] = run_job_agent(**kwargs)
+        # 重新渲染页面，让结果区和历史记录区立刻刷新。
         st.rerun()
 
 
 def render_results_panel():
+    """渲染 Agent 运行结果。"""
+
     result = st.session_state.get("last_result")
     if not result:
+        # 第一次打开页面还没跑过 Agent 时，显示空状态提示。
         st.markdown(
             '<div class="result-shell"><div class="section-title">No Run Yet</div>'
             '<div class="mono-note">Use the sample inputs or paste your own JD and resume, then click "Run Job Agent".</div>'
@@ -330,6 +375,7 @@ def render_results_panel():
     with metrics[0]:
         render_metric("Match Score", str(result["match_score"]), "Heuristic fit score from required skill overlap")
     with metrics[1]:
+        # 给不同决策配上不同颜色，让用户一眼看出结果类型。
         status_class = f"status-chip status-{result['apply_decision']}"
         render_metric("Decision", result["apply_decision"], "Graph route selected for the application")
         st.markdown(f'<span class="{status_class}">{result["apply_decision"]}</span>', unsafe_allow_html=True)
@@ -351,6 +397,18 @@ def render_results_panel():
 
 
 def main():
+    """页面主入口。
+
+    你可以把执行顺序记成：
+    1. 配置页面
+    2. 应用样式
+    3. 准备默认状态
+    4. 渲染标题
+    5. 渲染侧边栏
+    6. 渲染输入区
+    7. 渲染结果区
+    """
+
     st.set_page_config(page_title="MiniMind Job Agent", page_icon=":briefcase:", layout="wide")
     apply_page_style()
     ensure_session_defaults()
